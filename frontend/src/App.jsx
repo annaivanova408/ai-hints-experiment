@@ -21,14 +21,14 @@ function Setup({onStart}) {
     <label>ID участника<input required value={form.subject_id} onChange={e=>setForm({...form, subject_id:e.target.value})}/></label>
     <label>Пол<select required value={form.sex} onChange={e=>setForm({...form, sex:e.target.value})}><option value="">Выберите</option><option>Женский</option><option>Мужской</option><option>Другое</option></select></label>
     <label>Возраст<input required type="number" min="18" max="100" value={form.age} onChange={e=>setForm({...form, age:e.target.value})}/></label>
-    <label>Образование<input required value={form.education} onChange={e=>setForm({...form, education:e.target.value})}/></label>
-    <label className="check full"><input type="checkbox" checked={form.consent_confirmed} onChange={e=>setForm({...form, consent_confirmed:e.target.checked})}/><span>Информированное согласие получено отдельно</span></label>
+    <label>Образование<select required value={form.education} onChange={e=>setForm({...form, education:e.target.value})}><option value="">Выберите уровень</option><option>Среднее общее</option><option>Среднее профессиональное</option><option>Неоконченное высшее</option><option>Высшее - бакалавриат или специалитет</option><option>Магистратура</option><option>Аспирантура или ученая степень</option></select></label>
+    <label className="check full"><input required type="checkbox" checked={form.consent_confirmed} onChange={e=>setForm({...form, consent_confirmed:e.target.checked})}/><span>Информированное согласие получено отдельно</span></label>
     {error && <div className="error full">{error}</div>}<button className="primary full" type="submit">Начать <ArrowRight size={20}/></button>
   </form></section>;
 }
 
 function Instructions({session, onContinue}) {
-  return <section className="panel prose"><div className="eyebrow">ID {session.subject_id}</div><h1>Инструкция</h1><p>Вам предстоит посмотреть три коротких видео и ответить на вопросы по их содержанию.</p><p>После каждого смыслового фрагмента сначала появится вопрос. Затем обязательно откройте подсказку, внимательно прочитайте ее и оцените полезность. После короткой паузы выберите ответ.</p><div className="notice"><strong>Важно:</strong> отвечайте самостоятельно и старайтесь смотреть в центр экрана. Не переключайтесь между окнами во время прохождения.</div><p>Перед основной частью будут два тренировочных задания и калибровка оборудования.</p><button className="primary" onClick={onContinue}>Перейти к тренировке <ArrowRight size={20}/></button></section>;
+  return <section className="panel prose"><div className="eyebrow">ID {session.subject_id}</div><h1>Инструкция</h1><p>Вам предстоит посмотреть три коротких видео и ответить на вопросы по их содержанию.</p><p>После каждого смыслового фрагмента вопрос и варианты ответа появятся на одном экране. Выберите предварительный ответ и обязательно откройте подсказку. После подсказки и короткой паузы подтвердите итоговый вариант.</p><div className="notice"><strong>Важно:</strong> отвечайте самостоятельно и старайтесь смотреть в центр экрана. Не переключайтесь между окнами во время прохождения.</div><p>Перед основной частью будут два тренировочных задания и калибровка оборудования.</p><button className="primary" onClick={onContinue}>Перейти к тренировке <ArrowRight size={20}/></button></section>;
 }
 
 function Finish({session}) {

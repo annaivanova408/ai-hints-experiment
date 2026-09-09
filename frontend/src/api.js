@@ -1,6 +1,16 @@
 async function request(path, options = {}) {
   const response = await fetch(path, {headers: {"Content-Type": "application/json", ...(options.headers || {})}, ...options});
-  if (!response.ok) throw new Error((await response.text()) || `Ошибка ${response.status}`);
+  if (!response.ok) {
+    const raw = await response.text();
+    let message = raw;
+    try {
+      const parsed = JSON.parse(raw);
+      message = typeof parsed.detail === "string" ? parsed.detail : parsed.detail?.[0]?.msg;
+    } catch {
+      // The server may return plain text.
+    }
+    throw new Error(message || `Не удалось выполнить запрос. Код ошибки: ${response.status}`);
+  }
   return response.json();
 }
 
