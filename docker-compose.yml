@@ -1,0 +1,33 @@
+name: ai-hints-experiment
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ai_hints_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////data/experiment.sqlite3
+      MARKER_UDP_HOST: ${MARKER_UDP_HOST:-}
+      MARKER_UDP_PORT: ${MARKER_UDP_PORT:-0}
+    volumes:
+      - experiment_data:/data
+    ports:
+      - "127.0.0.1:8010:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: ai_hints_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    volumes:
+      - ./clips:/usr/share/nginx/html/clips:ro
+    ports:
+      - "127.0.0.1:3010:80"
+
+volumes:
+  experiment_data:

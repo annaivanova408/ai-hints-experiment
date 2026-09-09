@@ -1,0 +1,14 @@
+import { useState } from "react";
+import { ArrowRight, Check } from "lucide-react";
+import { api } from "./api";
+
+export default function Anxiety({config}) {
+  const [id,setId]=useState(""); const [session,setSession]=useState(null); const [pos,setPos]=useState(0); const [answers,setAnswers]=useState({}); const [done,setDone]=useState(false); const [error,setError]=useState("");
+  if(!config)return <section className="panel">Загрузка...</section>;
+  const begin=async e=>{e.preventDefault();try{setSession(await api.session(id.trim()))}catch(err){setError("Сессия с таким ID не найдена")}};
+  if(!session)return <section className="panel setup"><div className="eyebrow">Отдельный опросник</div><h1>Тревога и страхи использования ИИ</h1><p className="lead">Опросник не входит в основной эксперимент. Введите ID существующего участника.</p><form onSubmit={begin}><label>ID участника<input required value={id} onChange={e=>setId(e.target.value)}/></label>{error&&<div className="error">{error}</div>}<button className="primary">Открыть опросник <ArrowRight size={20}/></button></form></section>;
+  if(done)return <section className="panel prose center"><div className="success"><Check/></div><h1>Ответы сохранены</h1><p>Спасибо за участие.</p></section>;
+  const order=session.assignment.anxiety_order||config.anxiety.items.map((_,i)=>i); const item=config.anxiety.items[order[pos]]; const value=answers[item.id];
+  const finish=async()=>{const scales={};for(const [name,ids] of Object.entries(config.anxiety.scales))scales[name]=ids.reduce((s,n)=>s+answers[n],0)/ids.length;const second_order={conditioning:(scales.PVA+scales.BBA)/2,indirect_experience:(scales.JRA+scales.LA)/2,informational_learning:(scales.ERA+scales.AEA)/2,non_associative:(scales.ACA+scales.LOTA)/2};const general=Object.values(scales).reduce((a,b)=>a+b,0)/8;await api.record(session.subject_id,"anxiety","complete",{answers,scales,second_order,general_score:general,item_order:order.map(i=>config.anxiety.items[i].id)});setDone(true)};
+  return <section className="panel survey"><div className="eyebrow">Отдельный опросник · ID {session.subject_id}</div><h1>Отношение к искусственному интеллекту</h1>{pos===0&&<p className="lead">{config.anxiety.instruction} Здесь нет правильных и неправильных ответов.</p>}<div className="survey-progress"><span>Утверждение {pos+1} из {order.length}</span><div><i style={{width:`${(pos+1)/order.length*100}%`}}/></div></div><h2>{item.text}</h2><div className="survey-scale">{[1,2,3,4,5,6,7].map(n=><button className={value===n?"selected":""} key={n} onClick={()=>setAnswers({...answers,[item.id]:n})}>{n}</button>)}</div><div className="scale-labels"><span>Совершенно не согласен(на)</span><span>Полностью согласен(на)</span></div><button className="primary" disabled={!value} onClick={()=>pos+1<order.length?setPos(pos+1):finish()}>{pos+1<order.length?"Следующее утверждение":"Завершить"} <ArrowRight size={20}/></button></section>;
+}
