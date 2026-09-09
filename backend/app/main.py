@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
@@ -35,6 +36,8 @@ DB_LOCK = threading.Lock()
 
 
 app = FastAPI(title="Эксперимент с подсказками", version="0.1.0")
+CLIPS_PATH = Path(os.getenv("CLIPS_PATH", PROJECT_ROOT / "clips"))
+app.mount("/clips", StaticFiles(directory=CLIPS_PATH, check_dir=False), name="clips")
 
 
 def db() -> sqlite3.Connection:
