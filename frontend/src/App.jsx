@@ -28,12 +28,16 @@ function Setup({onStart}) {
 }
 
 function Instructions({session, onContinue}) {
-  return <section className="panel prose"><div className="eyebrow">ID {session.subject_id}</div><h1>Инструкция</h1><p>Вам предстоит посмотреть три коротких видео и ответить на вопросы по их содержанию.</p><p>После каждого смыслового фрагмента вопрос и варианты ответа появятся на одном экране. Выберите предварительный ответ и обязательно откройте подсказку. После подсказки и короткой паузы подтвердите итоговый вариант.</p><div className="notice"><strong>Важно:</strong> отвечайте самостоятельно и старайтесь смотреть в центр экрана. Не переключайтесь между окнами во время прохождения.</div><p>Перед основной частью будут два тренировочных задания и калибровка оборудования.</p><button className="primary" onClick={onContinue}>Перейти к тренировке <ArrowRight size={20}/></button></section>;
+  const start = () => {
+    document.documentElement.requestFullscreen().catch(() => {});
+    onContinue();
+  };
+  return <section className="panel prose"><div className="eyebrow">ID {session.subject_id}</div><h1>Инструкция</h1><p>Вам предстоит посмотреть три коротких видео и ответить на вопросы по их содержанию.</p><p>После каждого смыслового фрагмента появится вопрос и единственная активная кнопка «Нужна подсказка». Подсказка предъявляется в каждом задании. После её просмотра и короткой паузы появятся варианты ответа.</p><div className="notice"><strong>Важно:</strong> отвечайте самостоятельно и старайтесь смотреть в центр экрана. Не переключайтесь между окнами во время прохождения.</div><p>Перед основной частью будут два тренировочных задания и калибровка оборудования.</p><button className="primary" onClick={start}>Перейти к тренировке <ArrowRight size={20}/></button></section>;
 }
 
 function Finish({session}) {
   const base = `/api/sessions/${encodeURIComponent(session.subject_id)}/export`;
-  return <section className="panel prose center"><div className="success">Готово</div><h1>Спасибо за участие</h1><p>Сессия завершена, ответы и событийные метки сохранены.</p><div className="actions"><a className="secondary" href={`${base}/events.csv`}><Download size={19}/> Метки CSV</a><a className="primary" href={`${base}/results.json`}><Download size={19}/> Результаты JSON</a></div></section>;
+  return <section className="panel prose center"><div className="success">Готово</div><h1>Спасибо за участие</h1><p>Сессия завершена, ответы и событийные метки сохранены.</p><div className="actions"><a className="secondary" href={`${base}/trials.csv`}><Download size={19}/> Пробы CSV</a><a className="secondary" href={`${base}/events.csv`}><Download size={19}/> Метки CSV</a><a className="secondary" href={`${base}/meta.json`}><Download size={19}/> Meta JSON</a><a className="secondary" href={`${base}/aoi_definitions.json`}><Download size={19}/> AOI JSON</a><a className="primary" href={`${base}/results.json`}><Download size={19}/> Все результаты</a></div></section>;
 }
 
 export default function App() {

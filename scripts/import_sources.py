@@ -2,12 +2,36 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
+import random
 from zipfile import ZipFile
 from pathlib import Path
 
 from lxml import etree
 from openpyxl import load_workbook
+
+
+CONDITIONS = ("AI", "EXPERT", "CONTROL")
+
+
+def condition_sequence(count: int, rng: random.Random, previous: str | None) -> list[str]:
+    source = [condition for condition in CONDITIONS for _ in range(count // 3)]
+    for _ in range(100):
+        rng.shuffle(source)
+        if previous and source[0] == previous:
+            continue
+        if any(source[i] == source[i + 1] == source[i + 2] for i in range(len(source) - 2)):
+            continue
+        return list(source)
+    raise RuntimeError("Could not build a constrained condition sequence")
+
+
+def rotate_conditions(assignments: dict[str, str], offset: int) -> dict[str, str]:
+    return {
+        segment_id: CONDITIONS[(CONDITIONS.index(condition) + offset) % len(CONDITIONS)]
+        for segment_id, condition in assignments.items()
+    }
 
 
 def build_config(matrix_path: Path, anxiety_path: Path) -> dict:
@@ -97,9 +121,38 @@ def build_config(matrix_path: Path, anxiety_path: Path) -> dict:
     if len(statements) != 32:
         raise ValueError(f"Expected 32 anxiety items, found {len(statements)}")
 
+    video_ids = ["video_1", "video_2", "video_4"]
+    video_permutations = list(itertools.permutations(video_ids))
+    nasa_permutations = list(itertools.permutations(CONDITIONS))
+    assignment_slots = []
+    # Build slots in triads. Rotating the three condition labels makes every
+    # segment appear exactly ten times in every condition across 30 slots.
+    for triad in range(10):
+        rng = random.Random(20260909 + triad)
+        while True:
+            base_conditions = {}
+            boundaries = {}
+            for video_id in video_ids:
+                video_segments = [item for item in segments if item["video_id"] == video_id]
+                sequence = condition_sequence(len(video_segments), rng, None)
+                base_conditions.update({item["id"]: condition for item, condition in zip(video_segments, sequence)})
+                boundaries[video_id] = (sequence[0], sequence[-1])
+            triad_orders = [video_permutations[(triad * 3 + offset) % 6] for offset in range(3)]
+            if all(boundaries[order[i]][1] != boundaries[order[i + 1]][0] for order in triad_orders for i in range(2)):
+                break
+        for offset in range(3):
+            slot_index = triad * 3 + offset
+            assignment_slots.append({
+                "index": slot_index,
+                "video_order": list(video_permutations[slot_index % 6]),
+                "nasa_order": list(nasa_permutations[(slot_index * 5) % 6]),
+                "segment_conditions": rotate_conditions(base_conditions, offset),
+            })
+
     return {
-        "config_version": "2026-09-09-matrix-v1",
-        "video_ids": ["video_1", "video_2", "video_4"],
+        "config_version": "2026-09-10-matrix-v2",
+        "video_ids": video_ids,
+        "assignment_slots": assignment_slots,
         "settings": {
             "background": "#808080",
             "fixation_ms": 2000,

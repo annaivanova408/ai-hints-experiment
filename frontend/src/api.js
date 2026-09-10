@@ -20,6 +20,13 @@ export const api = {
   session: id => request(`/api/sessions/${encodeURIComponent(id)}`),
   state: (id, state) => request(`/api/sessions/${encodeURIComponent(id)}/state`, {method: "PUT", body: JSON.stringify({state})}),
   record: (id, record_type, record_key, payload) => request(`/api/sessions/${encodeURIComponent(id)}/records`, {method: "PUT", body: JSON.stringify({record_type, record_key, payload})}),
-  event: (id, event_code, event_name, details = {}) => request(`/api/sessions/${encodeURIComponent(id)}/events`, {method: "POST", body: JSON.stringify({timestamp_unix_ms: Date.now(), timestamp_monotonic_ms: performance.now(), event_code, event_name, segment_id: details.segment_id || null, condition: details.condition || null, payload: details.payload || {}})}),
+  event: (id, event_code, event_name, details = {}) => {
+    const aoi = [...document.querySelectorAll("[data-aoi]")].map(element => {
+      const rect = element.getBoundingClientRect();
+      return {name: element.dataset.aoi, x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height)};
+    });
+    const payload = {...(details.payload || {}), aoi, viewport: {width: window.innerWidth, height: window.innerHeight, device_pixel_ratio: window.devicePixelRatio}};
+    return request(`/api/sessions/${encodeURIComponent(id)}/events`, {method: "POST", body: JSON.stringify({timestamp_unix_ms: Date.now(), timestamp_monotonic_ms: performance.now(), event_code, event_name, segment_id: details.segment_id || null, condition: details.condition || null, payload})});
+  },
   complete: id => request(`/api/sessions/${encodeURIComponent(id)}/complete`, {method: "POST"}),
 };

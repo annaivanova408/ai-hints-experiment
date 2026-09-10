@@ -17,6 +17,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
+from mutagen.mp4 import MP4
 from pydantic import BaseModel, Field
 
 
@@ -158,19 +159,24 @@ def least_used_permutation(connection: sqlite3.Connection, key: str, variants: i
     return rng.choice(candidates)
 
 
+def least_used_slot(connection: sqlite3.Connection, subject_id: str) -> int:
+    slots = CONFIG["assignment_slots"]
+    counts = [0] * len(slots)
+    for row in connection.execute("SELECT assignment_json FROM sessions"):
+        assignment = json.loads(row[0])
+        index = assignment.get("assignment_slot")
+        if isinstance(index, int) and 0 <= index < len(slots):
+            counts[index] += 1
+    minimum = min(counts)
+    candidates = [index for index, count in enumerate(counts) if count == minimum]
+    return random.Random(stable_seed(subject_id, "assignment-slot")).choice(candidates)
+
+
 def build_assignment(connection: sqlite3.Connection, subject_id: str) -> dict[str, Any]:
-    video_index = least_used_permutation(connection, "video_permutation_index", 6, subject_id)
-    nasa_index = least_used_permutation(connection, "nasa_permutation_index", 6, subject_id)
-    video_order = list(VIDEO_PERMUTATIONS[video_index])
-    rng = random.Random(stable_seed(subject_id, "assignment"))
-    segment_conditions: dict[str, str] = {}
-    previous = None
-    for video_id in video_order:
-        segments = [x for x in CONFIG["segments"] if x["video_id"] == video_id]
-        sequence = constrained_conditions(len(segments), rng, previous)
-        for segment, condition in zip(segments, sequence):
-            segment_conditions[segment["id"]] = condition
-        previous = sequence[-1]
+    slot_index = least_used_slot(connection, subject_id)
+    slot = CONFIG["assignment_slots"][slot_index]
+    video_order = list(slot["video_order"])
+    segment_conditions = dict(slot["segment_conditions"])
 
     option_orders = {}
     for item in [*CONFIG["segments"], *CONFIG["final_test"]]:
@@ -182,10 +188,11 @@ def build_assignment(connection: sqlite3.Connection, subject_id: str) -> dict[st
     anxiety_order = list(range(len(CONFIG["anxiety"]["items"])))
     random.Random(stable_seed(subject_id, "anxiety")).shuffle(anxiety_order)
     return {
-        "video_permutation_index": video_index,
+        "assignment_slot": slot_index,
+        "video_permutation_index": list(VIDEO_PERMUTATIONS).index(tuple(video_order)),
         "video_order": video_order,
-        "nasa_permutation_index": nasa_index,
-        "nasa_order": list(NASA_PERMUTATIONS[nasa_index]),
+        "nasa_permutation_index": list(NASA_PERMUTATIONS).index(tuple(slot["nasa_order"])),
+        "nasa_order": list(slot["nasa_order"]),
         "segment_conditions": segment_conditions,
         "option_orders": option_orders,
         "final_test_order": final_test_order,
@@ -212,12 +219,33 @@ def validate_config() -> None:
             errors.append(f"{item['id']}: неизвестный сегмент")
         if item["correct"] not in item["options"]:
             errors.append(f"{item['id']}: неверный ключ correct")
+    slots = CONFIG.get("assignment_slots", [])
+    if len(slots) != 30:
+        errors.append("assignment_slots: должно быть ровно 30 заранее сформированных слотов")
+    if os.getenv("VALIDATE_MEDIA", "true").lower() == "true":
+        media = [clip for video in CONFIG["videos"] for clip in video["clips"]]
+        media.extend([
+            {"file": "practice_1.mp4", "duration_sec": 8.0},
+            {"file": "practice_2.mp4", "duration_sec": 8.0},
+        ])
+        for clip in media:
+            path = CLIPS_PATH / clip["file"]
+            if not path.exists():
+                errors.append(f"{clip['file']}: файл клипа не найден")
+                continue
+            try:
+                actual = float(MP4(path).info.length)
+            except Exception as error:
+                errors.append(f"{clip['file']}: не удалось прочитать длительность ({error})")
+                continue
+            if abs(actual - float(clip["duration_sec"])) > 0.04:
+                errors.append(f"{clip['file']}: длительность {actual:.3f} вместо {clip['duration_sec']:.3f}")
     if errors:
         raise RuntimeError("Ошибки stimuli.json:\n" + "\n".join(errors))
 
 
 def session_out(row: sqlite3.Row) -> dict[str, Any]:
-    return {
+    result = {
         "subject_id": row["subject_id"],
         "sex": row["sex"],
         "age": row["age"],
@@ -227,6 +255,10 @@ def session_out(row: sqlite3.Row) -> dict[str, Any]:
         "status": row["status"],
         "config_version": row["config_version"],
     }
+    if "created_at" in row.keys():
+        result["created_at"] = row["created_at"]
+        result["updated_at"] = row["updated_at"]
+    return result
 
 
 def emit_udp(event: EventIn, subject_id: str) -> None:
@@ -349,3 +381,70 @@ def export_results(subject_id: str):
     payload = session_out(session)
     payload["records"] = [{"record_type": row[0], "record_key": row[1], "payload": json.loads(row[2]), "created_at": row[3]} for row in records]
     return Response(json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{subject_id}_results.json"'})
+
+
+def session_and_records(subject_id: str) -> tuple[sqlite3.Row, list[sqlite3.Row]]:
+    with db() as connection:
+        session = connection.execute("SELECT * FROM sessions WHERE subject_id=?", (subject_id,)).fetchone()
+        records = connection.execute("SELECT record_type,record_key,payload_json,created_at FROM records WHERE subject_id=? ORDER BY id", (subject_id,)).fetchall()
+    if not session:
+        raise HTTPException(404, "Сессия не найдена")
+    return session, records
+
+
+@app.get("/api/sessions/{subject_id}/export/meta.json")
+def export_meta(subject_id: str):
+    session, _ = session_and_records(subject_id)
+    payload = session_out(session)
+    payload["screen_background"] = CONFIG["settings"]["background"]
+    payload["viewport_required"] = {"width": 1920, "height": 1080}
+    payload["randomization_seed_source"] = "SubjectID"
+    payload["settings"] = CONFIG["settings"]
+    return Response(json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{subject_id}_meta.json"'})
+
+
+TRIAL_HEADERS = [
+    "SubjectID", "Sex", "Age", "VideoID", "VideoOrderPosition", "SegmentWithinVideo", "SegmentGlobal", "SegmentID", "ClipFile", "ClipDuration_ms", "Condition", "ExpectedDifficulty", "LatencyToHint_ms", "HintReadTime_ms", "Satisfaction", "SatisfactionRT_ms", "ProbeAnswerKey", "ProbeAnswerPosition", "ProbeCorrect", "ProbeRT_ms", "T_clipStart_ms", "T_clipEnd_ms", "T_fixation_ms", "T_question_ms", "T_hintRequest_ms", "T_hintShown_ms", "T_hintClosed_ms", "T_recoveryStart_ms", "T_recoveryEnd_ms", "T_answer_ms", "IsPractice"
+]
+
+
+@app.get("/api/sessions/{subject_id}/export/trials.csv")
+def export_trials(subject_id: str):
+    session, records = session_and_records(subject_id)
+    assignment = json.loads(session["assignment_json"])
+    trials = {row[1]: json.loads(row[2]) for row in records if row[0] == "trial"}
+    segment_map = {item["id"]: item for item in CONFIG["segments"]}
+    presented = []
+    for video_position, video_id in enumerate(assignment["video_order"], start=1):
+        for segment in [item for item in CONFIG["segments"] if item["video_id"] == video_id]:
+            presented.append((video_position, segment))
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=TRIAL_HEADERS)
+    writer.writeheader()
+    for global_position, (video_position, segment) in enumerate(presented, start=1):
+        trial = trials.get(segment["id"], {})
+        row = {header: "" for header in TRIAL_HEADERS}
+        row.update({
+            "SubjectID": subject_id, "Sex": session["sex"], "Age": session["age"], "VideoID": segment["video_id"], "VideoOrderPosition": video_position,
+            "SegmentWithinVideo": segment["within_video"], "SegmentGlobal": global_position, "SegmentID": segment["id"], "ClipFile": segment["clip_file"],
+            "ClipDuration_ms": round(segment["duration_sec"] * 1000), "Condition": assignment["segment_conditions"][segment["id"]], "ExpectedDifficulty": segment["expected_difficulty"], "IsPractice": False,
+        })
+        row.update({key: trial.get(key, "") for key in TRIAL_HEADERS if key in trial})
+        writer.writerow(row)
+    return Response(output.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{subject_id}_trials.csv"'})
+
+
+@app.get("/api/sessions/{subject_id}/export/aoi_definitions.json")
+def export_aoi(subject_id: str):
+    with db() as connection:
+        rows = connection.execute("SELECT event_name,payload_json FROM events WHERE subject_id=? ORDER BY id", (subject_id,)).fetchall()
+    definitions = []
+    seen = set()
+    for row in rows:
+        payload = json.loads(row["payload_json"])
+        for area in payload.get("aoi", []):
+            key = (row["event_name"], area.get("name"), area.get("x"), area.get("y"), area.get("w"), area.get("h"))
+            if key not in seen:
+                seen.add(key)
+                definitions.append({"screen": row["event_name"], **area, "viewport": payload.get("viewport")})
+    return Response(json.dumps(definitions, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{subject_id}_aoi_definitions.json"'})

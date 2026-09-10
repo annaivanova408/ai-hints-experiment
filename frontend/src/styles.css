@@ -7,3 +7,31 @@
 .error{padding:14px 16px;background:#fff5f3;color:#8b2c22;border:1px solid #efc8c1;border-radius:6px;font-weight:600;line-height:1.45}
 .answer-actions{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap}
 .answer-actions>span{max-width:330px;text-align:left;color:#66776f;font-size:14px;line-height:1.45}
+
+/* Experimental screens use one photometrically stable 1920x1080 coordinate system. */
+.experiment-shell{padding:0;display:block;background:#808080;overflow:hidden}
+.study-screen{width:100vw;max-width:none;height:100vh;min-height:100vh;background:#808080;overflow:hidden}
+.study-top{height:54px;min-height:54px;padding:0 28px;color:#fff}
+.study-card{width:100%;height:calc(100vh - 54px);max-height:none;min-height:0;padding:40px 64px;border-radius:0;background:#808080;color:#fff;box-shadow:none}
+.question-only,.hint-content{width:1100px;height:520px;max-width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.question-only h2,.hint-content h2{width:980px;max-width:100%}
+.hint-content p{width:980px;height:230px;max-width:100%;margin:10px auto 28px;display:flex;align-items:center;text-align:left;font-size:22px;line-height:1.65}
+.source-icon{width:64px;height:64px;display:grid;place-items:center;margin-bottom:10px;color:#fff}
+.screen-video .study-top{position:absolute;inset:0 0 auto 0;z-index:2;background:rgba(0,0,0,.45)}
+.screen-video .study-card{height:100vh;padding:0}
+.screen-video .video-wrap{width:100vw;height:100vh;border-radius:0}
+.screen-video .video-wrap>video:not(.video-preload){width:100vw;height:100vh;object-fit:contain}
+.video-preload{position:fixed!important;width:1px!important;height:1px!important;left:-10px;bottom:-10px;opacity:0;pointer-events:none}
+.study-card{cursor:none}
+.study-card button,.study-card input,.study-card select,.study-card label{cursor:pointer}
+.study-card input{cursor:text}
+.calibration-fields{display:grid;grid-template-columns:1fr 1fr;gap:18px;width:min(560px,100%);margin:26px auto}
+.calibration-fields label{text-align:left;color:#fff}
+.nasa-instruction{max-width:900px;margin:0 auto 35px;font-size:17px;line-height:1.55;color:#fff}
+.nasa-grid button{font-size:12px;padding:0}
+.nasa-scale{position:relative;width:min(100%,900px);margin:42px auto 0}.nasa-scale input{position:relative;z-index:2;width:100%;height:34px;margin:0;cursor:pointer;background:transparent;appearance:none;-webkit-appearance:none}.nasa-scale input::-webkit-slider-runnable-track{height:4px;background:#eef4f0;border-radius:2px}.nasa-scale input::-moz-range-track{height:4px;background:#eef4f0;border-radius:2px}.nasa-scale input::-webkit-slider-thumb{width:24px;height:24px;margin-top:-10px;border:3px solid #fff;border-radius:50%;background:#287a50;box-shadow:0 1px 5px #17231d55;appearance:none;-webkit-appearance:none}.nasa-scale input::-moz-range-thumb{width:20px;height:20px;border:3px solid #fff;border-radius:50%;background:#287a50;box-shadow:0 1px 5px #17231d55}.nasa-scale input.empty::-webkit-slider-thumb{opacity:0}.nasa-scale input.empty::-moz-range-thumb{opacity:0}.nasa-ticks{position:absolute;z-index:1;top:16px;left:10px;right:10px;display:flex;justify-content:space-between;pointer-events:none}.nasa-ticks i{display:block;width:1px;height:12px;background:#d7e3dc}.nasa-scale .scale-labels{margin-top:6px}
+.screen-answer .options,.screen-final-test .options{width:min(980px,100%);margin-left:auto;margin-right:auto}
+.screen-answer .options button,.screen-final-test .options button{background:#fff;color:#17221d}
+.screen-satisfaction .scale-buttons button,.screen-learnability .scale-buttons button,.screen-manipulation .scale-buttons button{background:#fff;color:#17221d}
+.screen-satisfaction .scale-buttons button.selected,.screen-learnability .scale-buttons button.selected,.screen-manipulation .scale-buttons button.selected{background:var(--green);color:#fff}
+.screen-satisfaction .scale-labels,.screen-learnability .scale-labels,.screen-manipulation .scale-labels,.screen-nasa .scale-labels{color:#fff}
