@@ -8,5 +8,6 @@ __pycache__/
 *.sqlite3-wal
 node_modules/
 dist/
+backups/
 clips/*.mp4
 !clips/.gitkeep
