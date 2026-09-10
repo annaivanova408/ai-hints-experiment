@@ -22,7 +22,8 @@
 .screen-video .video-wrap{width:100vw;height:100vh;border-radius:0}
 .screen-video .video-wrap>video:not(.video-preload){width:100vw;height:100vh;object-fit:contain}
 .video-preload{position:fixed!important;width:1px!important;height:1px!important;left:-10px;bottom:-10px;opacity:0;pointer-events:none}
-.study-card{cursor:none}
+.study-card{cursor:default}
+.screen-video .study-card,.screen-fixation .study-card,.screen-recovery .study-card{cursor:none}
 .study-card button,.study-card input,.study-card select,.study-card label{cursor:pointer}
 .study-card input{cursor:text}
 .calibration-fields{display:grid;grid-template-columns:1fr 1fr;gap:18px;width:min(560px,100%);margin:26px auto}
