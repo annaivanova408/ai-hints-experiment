@@ -143,9 +143,8 @@ function VideoClip({clip,demo,onDone,emit,videoId,videoPosition,index,total,next
 }
 
 function Calibration({emit,onDone}) {
-  const [values,setValues]=useState({accuracy_x:"",accuracy_y:""});
   useEffect(()=>{emit(11,"calibration_start");},[]);
-  return <Frame eyebrow="Подготовка оборудования" screen="operator"><div className="operator"><h2>Калибровка айтрекера</h2><p>Запустите калибровку на оборудовании и внесите полученную точность.</p><div className="calibration-fields"><label>Ошибка по X, °<input type="number" step="0.01" required value={values.accuracy_x} onChange={event=>setValues({...values,accuracy_x:event.target.value})}/></label><label>Ошибка по Y, °<input type="number" step="0.01" required value={values.accuracy_y} onChange={event=>setValues({...values,accuracy_y:event.target.value})}/></label></div><button className="primary" disabled={values.accuracy_x===""||values.accuracy_y===""} onClick={()=>{emit(12,"calibration_end",{payload:values});onDone(values);}}>Калибровка завершена <Check size={20}/></button></div></Frame>;
+  return <Frame eyebrow="Подготовка оборудования" screen="operator"><div className="operator"><h2>Калибровка айтрекера</h2><p>Выполните калибровку на оборудовании перед продолжением исследования.</p><button className="primary" onClick={()=>{emit(12,"calibration_end",{payload:{accuracy_recorded:false}});onDone({accuracy_recorded:false});}}>Далее <ArrowRight size={20}/></button></div></Frame>;
 }
 
 function DriftCheck({emit,onDone}) {
