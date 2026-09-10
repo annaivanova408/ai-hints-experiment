@@ -10,6 +10,8 @@ docker compose up --build
 
 После запуска откройте [http://localhost:3010](http://localhost:3010).
 
+Данные сохраняются в PostgreSQL 16. Контейнер базы использует отдельный постоянный Docker-том `postgres_data`; старый том `experiment_data` сохраняется для резервных копий и переноса данных из прежней SQLite-версии.
+
 Для ускоренного пилотирования откройте [http://localhost:3010/?demo=1](http://localhost:3010/?demo=1). На видеоэкране появится служебная кнопка завершения клипа, остальные этапы и сохранение данных останутся рабочими.
 
 Отдельный опросник тревоги открывается по адресу [http://localhost:3010/anxiety](http://localhost:3010/anxiety) и привязывается к ID уже созданной сессии.
@@ -54,6 +56,24 @@ python scripts/cut_videos.py /путь/к/исходным-видео clips
 cp .env.example .env
 docker compose up -d --build
 curl -fsS http://127.0.0.1:8011/api/health
+```
+
+Перед первым производственным запуском замените `POSTGRES_PASSWORD` в `.env` на длинный случайный пароль. Если сервер обновляется с SQLite-версии, сначала сделайте копию `/data/experiment.sqlite3`, запустите только PostgreSQL и перенесите данные до переключения backend:
+
+```bash
+docker compose up -d db
+docker compose build backend
+docker compose run --rm backend python -m app.migrate_sqlite
+docker compose up -d
+```
+
+Миграция проверяет количество строк во всех трех таблицах и останавливается, если целевая PostgreSQL уже содержит данные. Это защищает существующие записи от случайной перезаписи.
+
+Проверить состояние базы можно так:
+
+```bash
+docker compose exec -T db psql -U "${POSTGRES_USER:-ai_hints}" -d "${POSTGRES_DB:-ai_hints}" \
+  -c "SELECT (SELECT count(*) FROM sessions) AS sessions, (SELECT count(*) FROM events) AS events, (SELECT count(*) FROM records) AS records;"
 ```
 
 Пример блока Caddy находится в `deploy/Caddyfile.example`. До выпуска сертификата DNS-запись `A` для `edu1.datascope.online` должна указывать на IP сервера.

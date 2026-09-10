@@ -9,7 +9,6 @@ import os
 import random
 import socket
 import sqlite3
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +18,11 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from mutagen.mp4 import MP4
 from pydantic import BaseModel, Field
+from sqlalchemy import insert, select, text, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+from .database import engine, events, init_db, records, sessions, transaction
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -26,72 +30,16 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_PATH = Path(os.getenv("CONFIG_PATH", PROJECT_ROOT / "data" / "stimuli.json"))
 if not DATA_PATH.exists():
     DATA_PATH = APP_ROOT / "data" / "stimuli.json"
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{PROJECT_ROOT / 'experiment.sqlite3'}")
-DB_PATH = DATABASE_URL.removeprefix("sqlite:///")
 CONFIG = json.loads(DATA_PATH.read_text(encoding="utf-8"))
 CONFIG_VERSION = CONFIG["config_version"]
 CONDITIONS = ("AI", "EXPERT", "CONTROL")
 VIDEO_PERMUTATIONS = list(itertools.permutations(CONFIG["video_ids"]))
 NASA_PERMUTATIONS = list(itertools.permutations(CONDITIONS))
-DB_LOCK = threading.Lock()
 
 
 app = FastAPI(title="Эксперимент с подсказками", version="0.1.0")
 CLIPS_PATH = Path(os.getenv("CLIPS_PATH", PROJECT_ROOT / "clips"))
 app.mount("/clips", StaticFiles(directory=CLIPS_PATH, check_dir=False), name="clips")
-
-
-def db() -> sqlite3.Connection:
-    connection = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA foreign_keys=ON")
-    return connection
-
-
-def init_db() -> None:
-    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-    with db() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS sessions (
-                subject_id TEXT PRIMARY KEY,
-                sex TEXT NOT NULL,
-                age INTEGER NOT NULL,
-                education TEXT NOT NULL,
-                assignment_json TEXT NOT NULL,
-                state_json TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active',
-                config_version TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                subject_id TEXT NOT NULL,
-                timestamp_unix_ms INTEGER NOT NULL,
-                timestamp_monotonic_ms REAL NOT NULL,
-                server_unix_ms INTEGER NOT NULL,
-                event_code INTEGER NOT NULL,
-                event_name TEXT NOT NULL,
-                segment_id TEXT,
-                condition_name TEXT,
-                payload_json TEXT NOT NULL,
-                FOREIGN KEY(subject_id) REFERENCES sessions(subject_id)
-            );
-            CREATE INDEX IF NOT EXISTS ix_events_subject ON events(subject_id, id);
-            CREATE TABLE IF NOT EXISTS records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                subject_id TEXT NOT NULL,
-                record_type TEXT NOT NULL,
-                record_key TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(subject_id, record_type, record_key),
-                FOREIGN KEY(subject_id) REFERENCES sessions(subject_id)
-            );
-            """
-        )
 
 
 @app.on_event("startup")
@@ -133,6 +81,16 @@ def stable_seed(subject_id: str, namespace: str) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
+def decode_json(value: Any) -> Any:
+    return json.loads(value) if isinstance(value, str) else value
+
+
+def assignment_values(connection) -> list[Any]:
+    if isinstance(connection, sqlite3.Connection):
+        return [row[0] for row in connection.execute("SELECT assignment_json FROM sessions")]
+    return list(connection.execute(select(sessions.c.assignment_json)).scalars())
+
+
 def constrained_conditions(count: int, rng: random.Random, previous: str | None) -> list[str]:
     per_condition = count // 3
     source = [condition for condition in CONDITIONS for _ in range(per_condition)]
@@ -148,8 +106,8 @@ def constrained_conditions(count: int, rng: random.Random, previous: str | None)
 
 def least_used_permutation(connection: sqlite3.Connection, key: str, variants: int, subject_id: str) -> int:
     counts = [0] * variants
-    for row in connection.execute("SELECT assignment_json FROM sessions"):
-        assignment = json.loads(row[0])
+    for value in assignment_values(connection):
+        assignment = decode_json(value)
         index = assignment.get(key)
         if isinstance(index, int) and 0 <= index < variants:
             counts[index] += 1
@@ -162,8 +120,8 @@ def least_used_permutation(connection: sqlite3.Connection, key: str, variants: i
 def least_used_slot(connection: sqlite3.Connection, subject_id: str) -> int:
     slots = CONFIG["assignment_slots"]
     counts = [0] * len(slots)
-    for row in connection.execute("SELECT assignment_json FROM sessions"):
-        assignment = json.loads(row[0])
+    for value in assignment_values(connection):
+        assignment = decode_json(value)
         index = assignment.get("assignment_slot")
         if isinstance(index, int) and 0 <= index < len(slots):
             counts[index] += 1
@@ -244,20 +202,20 @@ def validate_config() -> None:
         raise RuntimeError("Ошибки stimuli.json:\n" + "\n".join(errors))
 
 
-def session_out(row: sqlite3.Row) -> dict[str, Any]:
+def session_out(row) -> dict[str, Any]:
     result = {
         "subject_id": row["subject_id"],
         "sex": row["sex"],
         "age": row["age"],
         "education": row["education"],
-        "assignment": json.loads(row["assignment_json"]),
-        "state": json.loads(row["state_json"]),
+        "assignment": decode_json(row["assignment_json"]),
+        "state": decode_json(row["state_json"]),
         "status": row["status"],
         "config_version": row["config_version"],
     }
     if "created_at" in row.keys():
-        result["created_at"] = row["created_at"]
-        result["updated_at"] = row["updated_at"]
+        result["created_at"] = row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"]
+        result["updated_at"] = row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"]
     return result
 
 
@@ -276,6 +234,8 @@ def emit_udp(event: EventIn, subject_id: str) -> None:
 
 @app.get("/api/health")
 def health():
+    with transaction() as connection:
+        connection.execute(text("SELECT 1"))
     return {"status": "ok", "config_version": CONFIG_VERSION}
 
 
@@ -288,26 +248,38 @@ def get_config():
 def start_session(data: StartIn):
     if not data.consent_confirmed:
         raise HTTPException(422, "Подтвердите, что информированное согласие оформлено отдельно")
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     subject_id = data.subject_id.strip()
-    with DB_LOCK, db() as connection:
-        existing = connection.execute("SELECT * FROM sessions WHERE subject_id=?", (subject_id,)).fetchone()
+    with transaction() as connection:
+        if engine.dialect.name == "postgresql":
+            connection.execute(text("SELECT pg_advisory_xact_lock(73194721)"))
+        existing = connection.execute(select(sessions).where(sessions.c.subject_id == subject_id)).mappings().first()
         if existing:
             return session_out(existing)
         assignment = build_assignment(connection, subject_id)
         state = {"screen": "instructions", "video_position": 0, "segment_position": 0}
         connection.execute(
-            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)",
-            (subject_id, data.sex, data.age, data.education, json.dumps(assignment), json.dumps(state), CONFIG_VERSION, now, now),
+            insert(sessions).values(
+                subject_id=subject_id,
+                sex=data.sex,
+                age=data.age,
+                education=data.education,
+                assignment_json=assignment,
+                state_json=state,
+                status="active",
+                config_version=CONFIG_VERSION,
+                created_at=now,
+                updated_at=now,
+            )
         )
-        row = connection.execute("SELECT * FROM sessions WHERE subject_id=?", (subject_id,)).fetchone()
+        row = connection.execute(select(sessions).where(sessions.c.subject_id == subject_id)).mappings().first()
     return session_out(row)
 
 
 @app.get("/api/sessions/{subject_id}")
 def get_session(subject_id: str):
-    with db() as connection:
-        row = connection.execute("SELECT * FROM sessions WHERE subject_id=?", (subject_id,)).fetchone()
+    with transaction() as connection:
+        row = connection.execute(select(sessions).where(sessions.c.subject_id == subject_id)).mappings().first()
     if not row:
         raise HTTPException(404, "Сессия не найдена")
     return session_out(row)
@@ -315,11 +287,12 @@ def get_session(subject_id: str):
 
 @app.put("/api/sessions/{subject_id}/state")
 def save_state(subject_id: str, data: StateIn):
-    now = datetime.now(timezone.utc).isoformat()
-    with DB_LOCK, db() as connection:
+    now = datetime.now(timezone.utc)
+    with transaction() as connection:
         cursor = connection.execute(
-            "UPDATE sessions SET state_json=?, updated_at=? WHERE subject_id=?",
-            (json.dumps(data.state, ensure_ascii=False), now, subject_id),
+            update(sessions)
+            .where(sessions.c.subject_id == subject_id)
+            .values(state_json=data.state, updated_at=now)
         )
         if not cursor.rowcount:
             raise HTTPException(404, "Сессия не найдена")
@@ -329,12 +302,21 @@ def save_state(subject_id: str, data: StateIn):
 @app.post("/api/sessions/{subject_id}/events")
 def add_event(subject_id: str, event: EventIn):
     server_ms = int(time.time() * 1000)
-    with DB_LOCK, db() as connection:
-        if not connection.execute("SELECT 1 FROM sessions WHERE subject_id=?", (subject_id,)).fetchone():
+    with transaction() as connection:
+        if not connection.execute(select(sessions.c.subject_id).where(sessions.c.subject_id == subject_id)).first():
             raise HTTPException(404, "Сессия не найдена")
         connection.execute(
-            "INSERT INTO events (subject_id,timestamp_unix_ms,timestamp_monotonic_ms,server_unix_ms,event_code,event_name,segment_id,condition_name,payload_json) VALUES (?,?,?,?,?,?,?,?,?)",
-            (subject_id, event.timestamp_unix_ms, event.timestamp_monotonic_ms, server_ms, event.event_code, event.event_name, event.segment_id, event.condition, json.dumps(event.payload, ensure_ascii=False)),
+            insert(events).values(
+                subject_id=subject_id,
+                timestamp_unix_ms=event.timestamp_unix_ms,
+                timestamp_monotonic_ms=event.timestamp_monotonic_ms,
+                server_unix_ms=server_ms,
+                event_code=event.event_code,
+                event_name=event.event_name,
+                segment_id=event.segment_id,
+                condition_name=event.condition,
+                payload_json=event.payload,
+            )
         )
     emit_udp(event, subject_id)
     return {"ok": True, "server_unix_ms": server_ms}
@@ -342,54 +324,73 @@ def add_event(subject_id: str, event: EventIn):
 
 @app.put("/api/sessions/{subject_id}/records")
 def save_record(subject_id: str, record: RecordIn):
-    now = datetime.now(timezone.utc).isoformat()
-    with DB_LOCK, db() as connection:
+    now = datetime.now(timezone.utc)
+    insert_factory = postgresql_insert if engine.dialect.name == "postgresql" else sqlite_insert
+    statement = insert_factory(records).values(
+        subject_id=subject_id,
+        record_type=record.record_type,
+        record_key=record.record_key,
+        payload_json=record.payload,
+        created_at=now,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=[records.c.subject_id, records.c.record_type, records.c.record_key],
+        set_={"payload_json": record.payload, "created_at": now},
+    )
+    with transaction() as connection:
+        if not connection.execute(select(sessions.c.subject_id).where(sessions.c.subject_id == subject_id)).first():
+            raise HTTPException(404, "Сессия не найдена")
         connection.execute(
-            "INSERT INTO records (subject_id,record_type,record_key,payload_json,created_at) VALUES (?,?,?,?,?) ON CONFLICT(subject_id,record_type,record_key) DO UPDATE SET payload_json=excluded.payload_json, created_at=excluded.created_at",
-            (subject_id, record.record_type, record.record_key, json.dumps(record.payload, ensure_ascii=False), now),
+            statement
         )
     return {"ok": True}
 
 
 @app.post("/api/sessions/{subject_id}/complete")
 def complete_session(subject_id: str):
-    with DB_LOCK, db() as connection:
-        connection.execute("UPDATE sessions SET status='completed', updated_at=? WHERE subject_id=?", (datetime.now(timezone.utc).isoformat(), subject_id))
+    with transaction() as connection:
+        cursor = connection.execute(
+            update(sessions)
+            .where(sessions.c.subject_id == subject_id)
+            .values(status="completed", updated_at=datetime.now(timezone.utc))
+        )
+        if not cursor.rowcount:
+            raise HTTPException(404, "Сессия не найдена")
     return {"ok": True}
 
 
 @app.get("/api/sessions/{subject_id}/export/events.csv")
 def export_events(subject_id: str):
-    with db() as connection:
-        rows = connection.execute("SELECT * FROM events WHERE subject_id=? ORDER BY id", (subject_id,)).fetchall()
+    with transaction() as connection:
+        rows = connection.execute(select(events).where(events.c.subject_id == subject_id).order_by(events.c.id)).mappings().all()
     output = io.StringIO()
     headers = ["timestamp_unix_ms", "timestamp_monotonic_ms", "server_unix_ms", "event_code", "event_name", "subject_id", "segment_id", "condition", "payload_json"]
     writer = csv.DictWriter(output, fieldnames=headers)
     writer.writeheader()
     for row in rows:
-        writer.writerow({"timestamp_unix_ms": row["timestamp_unix_ms"], "timestamp_monotonic_ms": row["timestamp_monotonic_ms"], "server_unix_ms": row["server_unix_ms"], "event_code": row["event_code"], "event_name": row["event_name"], "subject_id": row["subject_id"], "segment_id": row["segment_id"], "condition": row["condition_name"], "payload_json": row["payload_json"]})
+        writer.writerow({"timestamp_unix_ms": row["timestamp_unix_ms"], "timestamp_monotonic_ms": row["timestamp_monotonic_ms"], "server_unix_ms": row["server_unix_ms"], "event_code": row["event_code"], "event_name": row["event_name"], "subject_id": row["subject_id"], "segment_id": row["segment_id"], "condition": row["condition_name"], "payload_json": json.dumps(decode_json(row["payload_json"]), ensure_ascii=False)})
     return Response(output.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{subject_id}_events.csv"'})
 
 
 @app.get("/api/sessions/{subject_id}/export/results.json")
 def export_results(subject_id: str):
-    with db() as connection:
-        session = connection.execute("SELECT * FROM sessions WHERE subject_id=?", (subject_id,)).fetchone()
-        records = connection.execute("SELECT record_type,record_key,payload_json,created_at FROM records WHERE subject_id=? ORDER BY id", (subject_id,)).fetchall()
+    with transaction() as connection:
+        session = connection.execute(select(sessions).where(sessions.c.subject_id == subject_id)).mappings().first()
+        result_rows = connection.execute(select(records).where(records.c.subject_id == subject_id).order_by(records.c.id)).mappings().all()
     if not session:
         raise HTTPException(404, "Сессия не найдена")
     payload = session_out(session)
-    payload["records"] = [{"record_type": row[0], "record_key": row[1], "payload": json.loads(row[2]), "created_at": row[3]} for row in records]
+    payload["records"] = [{"record_type": row["record_type"], "record_key": row["record_key"], "payload": decode_json(row["payload_json"]), "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"]} for row in result_rows]
     return Response(json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{subject_id}_results.json"'})
 
 
-def session_and_records(subject_id: str) -> tuple[sqlite3.Row, list[sqlite3.Row]]:
-    with db() as connection:
-        session = connection.execute("SELECT * FROM sessions WHERE subject_id=?", (subject_id,)).fetchone()
-        records = connection.execute("SELECT record_type,record_key,payload_json,created_at FROM records WHERE subject_id=? ORDER BY id", (subject_id,)).fetchall()
+def session_and_records(subject_id: str):
+    with transaction() as connection:
+        session = connection.execute(select(sessions).where(sessions.c.subject_id == subject_id)).mappings().first()
+        result_rows = connection.execute(select(records).where(records.c.subject_id == subject_id).order_by(records.c.id)).mappings().all()
     if not session:
         raise HTTPException(404, "Сессия не найдена")
-    return session, records
+    return session, result_rows
 
 
 @app.get("/api/sessions/{subject_id}/export/meta.json")
@@ -410,10 +411,9 @@ TRIAL_HEADERS = [
 
 @app.get("/api/sessions/{subject_id}/export/trials.csv")
 def export_trials(subject_id: str):
-    session, records = session_and_records(subject_id)
-    assignment = json.loads(session["assignment_json"])
-    trials = {row[1]: json.loads(row[2]) for row in records if row[0] == "trial"}
-    segment_map = {item["id"]: item for item in CONFIG["segments"]}
+    session, result_rows = session_and_records(subject_id)
+    assignment = decode_json(session["assignment_json"])
+    trials = {row["record_key"]: decode_json(row["payload_json"]) for row in result_rows if row["record_type"] == "trial"}
     presented = []
     for video_position, video_id in enumerate(assignment["video_order"], start=1):
         for segment in [item for item in CONFIG["segments"] if item["video_id"] == video_id]:
@@ -436,12 +436,12 @@ def export_trials(subject_id: str):
 
 @app.get("/api/sessions/{subject_id}/export/aoi_definitions.json")
 def export_aoi(subject_id: str):
-    with db() as connection:
-        rows = connection.execute("SELECT event_name,payload_json FROM events WHERE subject_id=? ORDER BY id", (subject_id,)).fetchall()
+    with transaction() as connection:
+        rows = connection.execute(select(events.c.event_name, events.c.payload_json).where(events.c.subject_id == subject_id).order_by(events.c.id)).mappings().all()
     definitions = []
     seen = set()
     for row in rows:
-        payload = json.loads(row["payload_json"])
+        payload = decode_json(row["payload_json"])
         for area in payload.get("aoi", []):
             key = (row["event_name"], area.get("name"), area.get("x"), area.get("y"), area.get("w"), area.get("h"))
             if key not in seen:

@@ -1,14 +1,33 @@
 name: ai-hints-experiment
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: ai_hints_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_hints}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_hints}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ai_hints_local}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_hints} -d ${POSTGRES_DB:-ai_hints}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: ai_hints_backend
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
-      DATABASE_URL: sqlite:////data/experiment.sqlite3
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_hints}:${POSTGRES_PASSWORD:-ai_hints_local}@db:5432/${POSTGRES_DB:-ai_hints}
       CLIPS_PATH: /clips
       MARKER_UDP_HOST: ${MARKER_UDP_HOST:-}
       MARKER_UDP_PORT: ${MARKER_UDP_PORT:-0}
@@ -34,3 +53,4 @@ services:
 
 volumes:
   experiment_data:
+  postgres_data:
