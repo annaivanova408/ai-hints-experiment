@@ -17,7 +17,7 @@
 .question-only h2{width:980px;max-width:100%}
 .hint-content{width:900px;height:470px;max-width:100%;display:grid;grid-template-rows:64px auto 180px 54px;justify-items:center;align-items:center;gap:12px}
 .hint-content h2{width:820px;max-width:100%;margin:0;text-align:center}
-.hint-content p{width:820px;height:180px;max-width:100%;margin:0;display:flex;align-items:center;text-align:left;font-size:22px;line-height:1.65}
+.hint-content p{width:820px;height:180px;max-width:100%;margin:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:22px;line-height:1.65}
 .source-icon{width:64px;height:64px;display:grid;place-items:center;margin-bottom:10px;color:#fff}
 .screen-video .study-top{position:absolute;inset:0 0 auto 0;z-index:2;background:rgba(0,0,0,.45)}
 .screen-video .study-card{height:100vh;padding:0}
