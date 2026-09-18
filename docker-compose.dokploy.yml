@@ -72,7 +72,11 @@ services:
     volumes:
       - clips_data:/clips:ro
     networks:
-      - internal
+      # Имя backend в общей сети сервера неуникально: фронтенд по нему находил
+      # чужой контейнер соседнего стека. Ходим по собственному алиасу.
+      internal:
+        aliases:
+          - hints-backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
       interval: 10s
