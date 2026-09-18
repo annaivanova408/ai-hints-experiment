@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, Download, Leaf } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Leaf } from "lucide-react";
 import { api } from "./api";
 import Experiment from "./Experiment";
 import Anxiety from "./Anxiety";
+import Admin from "./Admin";
 
 const demo = new URLSearchParams(location.search).get("demo") === "1";
 
@@ -32,23 +33,53 @@ function Instructions({session, onContinue}) {
     document.documentElement.requestFullscreen().catch(() => {});
     onContinue();
   };
-  return <section className="panel prose"><div className="eyebrow">ID {session.subject_id}</div><h1>Инструкция</h1><p>Вам предстоит посмотреть три коротких видео и ответить на вопросы по их содержанию.</p><p>После каждого смыслового фрагмента появится вопрос и единственная активная кнопка «Нужна подсказка». Подсказка предъявляется в каждом задании. После её просмотра и короткой паузы появятся варианты ответа.</p><div className="notice"><strong>Важно:</strong> отвечайте самостоятельно и старайтесь смотреть в центр экрана. Не переключайтесь между окнами во время прохождения.</div><p>Перед основной частью будут два тренировочных задания и калибровка оборудования.</p><button className="primary" onClick={start}>Перейти к тренировке <ArrowRight size={20}/></button></section>;
+  return <section className="panel prose instructions-panel"><div className="instruction-progress"><i style={{width:"2%"}}/></div><div className="eyebrow">ID {session.subject_id}</div><h1>Общая инструкция</h1><p>Вам предстоит посмотреть 3 видео, разделённые на 27 смысловых фрагментов, и ответить на вопросы по их содержанию.</p><p>После каждого смыслового фрагмента появится вопрос и единственная активная кнопка «Далее». После нажатия будет показана обязательная подсказка. Затем появятся варианты ответа.</p><div className="notice instruction-rules"><strong>Во время прохождения:</strong><ul><li>Отвечайте самостоятельно.</li><li>Когда появится крестик, смотрите на него.</li><li>Не переключайтесь между окнами.</li></ul></div><p>Перед основной частью будут тренировочные задания и калибровка оборудования.</p><button className="primary" onClick={start}>Продолжить <ArrowRight size={20}/></button></section>;
+}
+
+const DEMO_SCREENS = [
+  {label:"Общая инструкция", state:{screen:"instructions"}},
+  {label:"Инструкция к заданию", state:{screen:"experiment",phase:"task_instruction"}},
+  {label:"Перед тренировкой", state:{screen:"experiment",phase:"practice_intro"}},
+  {label:"Тренировочное видео", state:{screen:"experiment",phase:"practice",step:0,trialStage:"clip"}},
+  {label:"Вопрос тренировки", state:{screen:"experiment",phase:"practice",step:0,trialStage:"trial",demoTrialStage:"question"}},
+  {label:"Ответ ИИ", state:{screen:"experiment",phase:"practice",step:0,trialStage:"trial",demoTrialStage:"hint"}},
+  {label:"Ответ эксперта", state:{screen:"experiment",phase:"practice",step:1,trialStage:"trial",demoTrialStage:"hint"}},
+  {label:"Калибровка", state:{screen:"experiment",phase:"calibration",videoPos:0}},
+  {label:"Основное видео", state:{screen:"experiment",phase:"video",videoPos:0,clipPos:0,trialStage:"clip"}},
+  {label:"Вопрос по фрагменту", state:{screen:"experiment",phase:"video",videoPos:0,clipPos:0,trialStage:"trial",demoTrialStage:"question"}},
+  {label:"Оценка видео", state:{screen:"experiment",phase:"learnability",videoPos:0}},
+  {label:"Итоговый тест", state:{screen:"experiment",phase:"final_intro"}},
+  {label:"Оценка нагрузки", state:{screen:"experiment",phase:"nasa"}},
+  {label:"Завершающие вопросы", state:{screen:"experiment",phase:"manipulation",manipulationPos:0}},
+  {label:"Завершение", state:{screen:"experiment",phase:"debrief"}},
+];
+
+function DemoNavigator({session,onNavigate}) {
+  const state=session.state||{};
+  let index=DEMO_SCREENS.findIndex(item=>Object.entries(item.state).every(([key,value])=>state[key]===value));
+  if(index<0)index=DEMO_SCREENS.findIndex(item=>item.state.screen===state.screen&&item.state.phase===state.phase);
+  if(index<0)index=0;
+  const go=next=>onNavigate(DEMO_SCREENS[Math.max(0,Math.min(DEMO_SCREENS.length-1,next))].state);
+  return <aside className="demo-navigator"><strong>Демо</strong><button title="Предыдущий экран" aria-label="Предыдущий экран" disabled={index===0} onClick={()=>go(index-1)}><ChevronLeft/></button><select aria-label="Экран демонстрации" value={index} onChange={event=>go(Number(event.target.value))}>{DEMO_SCREENS.map((item,itemIndex)=><option key={item.label} value={itemIndex}>{item.label}</option>)}</select><button title="Следующий экран" aria-label="Следующий экран" disabled={index===DEMO_SCREENS.length-1} onClick={()=>go(index+1)}><ChevronRight/></button></aside>;
 }
 
 function Finish({session}) {
-  const base = `/api/sessions/${encodeURIComponent(session.subject_id)}/export`;
-  return <section className="panel prose center"><div className="success">Готово</div><h1>Спасибо за участие</h1><p>Сессия завершена, ответы и событийные метки сохранены.</p><div className="actions"><a className="secondary" href={`${base}/trials.csv`}><Download size={19}/> Пробы CSV</a><a className="secondary" href={`${base}/events.csv`}><Download size={19}/> Метки CSV</a><a className="secondary" href={`${base}/meta.json`}><Download size={19}/> Meta JSON</a><a className="secondary" href={`${base}/aoi_definitions.json`}><Download size={19}/> AOI JSON</a><a className="primary" href={`${base}/results.json`}><Download size={19}/> Все результаты</a></div></section>;
+  return <section className="panel prose center instructions-panel"><div className="instruction-progress"><i style={{width:"100%"}}/></div><div className="success" aria-label="Готово"><Check size={30} strokeWidth={2.5}/></div><h1>Спасибо за участие!</h1><p>Исследование завершено.</p></section>;
 }
 
 export default function App() {
   const [config, setConfig] = useState(null); const [session, setSession] = useState(null); const [error, setError] = useState("");
   useEffect(()=>{ api.config().then(setConfig).catch(e=>setError(e.message)); },[]);
+  if (location.pathname === "/admin") return <Admin/>;
   if (location.pathname === "/anxiety") return <Shell><Anxiety config={config}/></Shell>;
   if (error) return <Shell><div className="panel error">{error}</div></Shell>;
   if (!config) return <Shell><div className="panel">Загрузка...</div></Shell>;
   if (!session) return <Shell><Setup onStart={setSession}/></Shell>;
   const screen = session.state?.screen || "instructions";
-  if (screen === "instructions") return <Shell><Instructions session={session} onContinue={async()=>{const state={screen:"experiment", phase:"practice", step:0}; await api.state(session.subject_id,state); setSession({...session,state});}}/></Shell>;
-  if (screen === "completed") return <Shell><Finish session={session}/></Shell>;
-  return <Shell compact><Experiment config={config} initialSession={session} demo={demo} onFinish={s=>setSession(s)}/></Shell>;
+  let content;
+  if (screen === "instructions") content=<Shell><Instructions session={session} onContinue={async()=>{const state={screen:"experiment",phase:"task_instruction"};await api.state(session.subject_id,state);setSession({...session,state});}}/></Shell>;
+  else if (screen === "completed") content=<Shell><Finish session={session}/></Shell>;
+  else content=<Shell compact><Experiment key={demo?JSON.stringify(session.state):session.subject_id} config={config} initialSession={session} demo={demo} onFinish={s=>setSession(s)}/></Shell>;
+  const navigate=async state=>{await api.state(session.subject_id,state);setSession({...session,state});};
+  return <>{content}{demo&&screen!=="completed"&&<DemoNavigator session={session} onNavigate={navigate}/>}</>;
 }

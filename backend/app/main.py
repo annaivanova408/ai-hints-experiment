@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hashlib
+import hmac
 import io
 import itertools
 import json
@@ -10,15 +12,16 @@ import random
 import socket
 import sqlite3
 import time
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from mutagen.mp4 import MP4
 from pydantic import BaseModel, Field
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -35,6 +38,9 @@ CONFIG_VERSION = CONFIG["config_version"]
 CONDITIONS = ("AI", "EXPERT", "CONTROL")
 VIDEO_PERMUTATIONS = list(itertools.permutations(CONFIG["video_ids"]))
 NASA_PERMUTATIONS = list(itertools.permutations(CONDITIONS))
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
+ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", ADMIN_PASSWORD)
+ADMIN_TOKEN_TTL_SEC = 12 * 60 * 60
 
 
 app = FastAPI(title="Эксперимент с подсказками", version="0.1.0")
@@ -74,6 +80,31 @@ class RecordIn(BaseModel):
     record_type: str = Field(min_length=1, max_length=40)
     record_key: str = Field(min_length=1, max_length=100)
     payload: dict[str, Any]
+
+
+class AdminLoginIn(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+def create_admin_token() -> str:
+    expires_at = int(time.time()) + ADMIN_TOKEN_TTL_SEC
+    payload = str(expires_at)
+    signature = hmac.new(ADMIN_SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f"{payload}.{signature}".encode()).decode()
+
+
+def require_admin(authorization: str | None = Header(default=None)) -> None:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Требуется вход администратора")
+    try:
+        decoded = base64.urlsafe_b64decode(authorization.removeprefix("Bearer ").encode()).decode()
+        expires_at, signature = decoded.split(".", 1)
+        expected = hmac.new(ADMIN_SECRET_KEY.encode(), expires_at.encode(), hashlib.sha256).hexdigest()
+        valid = hmac.compare_digest(signature, expected) and int(expires_at) >= int(time.time())
+    except (ValueError, UnicodeDecodeError):
+        valid = False
+    if not valid:
+        raise HTTPException(401, "Сессия администратора истекла")
 
 
 def stable_seed(subject_id: str, namespace: str) -> int:
@@ -244,6 +275,34 @@ def get_config():
     return CONFIG
 
 
+@app.post("/api/admin/login")
+def admin_login(data: AdminLoginIn):
+    if not hmac.compare_digest(data.password, ADMIN_PASSWORD):
+        raise HTTPException(401, "Неверный пароль")
+    return {"token": create_admin_token(), "expires_in": ADMIN_TOKEN_TTL_SEC}
+
+
+@app.get("/api/admin/sessions")
+def admin_sessions(_: None = Depends(require_admin)):
+    event_count = select(func.count()).where(events.c.subject_id == sessions.c.subject_id).scalar_subquery()
+    record_count = select(func.count()).where(records.c.subject_id == sessions.c.subject_id).scalar_subquery()
+    statement = select(
+        sessions,
+        event_count.label("event_count"),
+        record_count.label("record_count"),
+    ).order_by(sessions.c.updated_at.desc())
+    with transaction() as connection:
+        rows = connection.execute(statement).mappings().all()
+    return [
+        {
+            **session_out(row),
+            "event_count": row["event_count"],
+            "record_count": row["record_count"],
+        }
+        for row in rows
+    ]
+
+
 @app.post("/api/sessions")
 def start_session(data: StartIn):
     if not data.consent_confirmed:
@@ -360,7 +419,7 @@ def complete_session(subject_id: str):
 
 
 @app.get("/api/sessions/{subject_id}/export/events.csv")
-def export_events(subject_id: str):
+def export_events(subject_id: str, _: None = Depends(require_admin)):
     with transaction() as connection:
         rows = connection.execute(select(events).where(events.c.subject_id == subject_id).order_by(events.c.id)).mappings().all()
     output = io.StringIO()
@@ -373,7 +432,7 @@ def export_events(subject_id: str):
 
 
 @app.get("/api/sessions/{subject_id}/export/results.json")
-def export_results(subject_id: str):
+def export_results(subject_id: str, _: None = Depends(require_admin)):
     with transaction() as connection:
         session = connection.execute(select(sessions).where(sessions.c.subject_id == subject_id)).mappings().first()
         result_rows = connection.execute(select(records).where(records.c.subject_id == subject_id).order_by(records.c.id)).mappings().all()
@@ -394,7 +453,7 @@ def session_and_records(subject_id: str):
 
 
 @app.get("/api/sessions/{subject_id}/export/meta.json")
-def export_meta(subject_id: str):
+def export_meta(subject_id: str, _: None = Depends(require_admin)):
     session, _ = session_and_records(subject_id)
     payload = session_out(session)
     payload["screen_background"] = CONFIG["settings"]["background"]
@@ -410,7 +469,7 @@ TRIAL_HEADERS = [
 
 
 @app.get("/api/sessions/{subject_id}/export/trials.csv")
-def export_trials(subject_id: str):
+def export_trials(subject_id: str, _: None = Depends(require_admin)):
     session, result_rows = session_and_records(subject_id)
     assignment = decode_json(session["assignment_json"])
     trials = {row["record_key"]: decode_json(row["payload_json"]) for row in result_rows if row["record_type"] == "trial"}
@@ -435,7 +494,7 @@ def export_trials(subject_id: str):
 
 
 @app.get("/api/sessions/{subject_id}/export/aoi_definitions.json")
-def export_aoi(subject_id: str):
+def export_aoi(subject_id: str, _: None = Depends(require_admin)):
     with transaction() as connection:
         rows = connection.execute(select(events.c.event_name, events.c.payload_json).where(events.c.subject_id == subject_id).order_by(events.c.id)).mappings().all()
     definitions = []
@@ -448,3 +507,59 @@ def export_aoi(subject_id: str):
                 seen.add(key)
                 definitions.append({"screen": row["event_name"], **area, "viewport": payload.get("viewport")})
     return Response(json.dumps(definitions, ensure_ascii=False, indent=2), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{subject_id}_aoi_definitions.json"'})
+
+
+def build_export_archive(subject_ids: list[str]) -> bytes:
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        summary = io.StringIO()
+        writer = csv.writer(summary)
+        writer.writerow(["subject_id", "sex", "age", "education", "status", "created_at", "updated_at"])
+        with transaction() as connection:
+            rows = connection.execute(
+                select(sessions).where(sessions.c.subject_id.in_(subject_ids)).order_by(sessions.c.created_at)
+            ).mappings().all()
+        for row in rows:
+            writer.writerow([
+                row["subject_id"], row["sex"], row["age"], row["education"], row["status"],
+                row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else row["created_at"],
+                row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else row["updated_at"],
+            ])
+        archive.writestr("participants.csv", summary.getvalue().encode("utf-8-sig"))
+        exporters = (
+            ("trials.csv", export_trials),
+            ("events.csv", export_events),
+            ("meta.json", export_meta),
+            ("aoi_definitions.json", export_aoi),
+            ("results.json", export_results),
+        )
+        for subject_id in subject_ids:
+            for filename, exporter in exporters:
+                response = exporter(subject_id, None)
+                archive.writestr(f"{subject_id}/{filename}", response.body)
+    return archive_buffer.getvalue()
+
+
+@app.get("/api/admin/export.zip")
+def admin_export_all(_: None = Depends(require_admin)):
+    with transaction() as connection:
+        subject_ids = list(connection.execute(select(sessions.c.subject_id).order_by(sessions.c.created_at)).scalars())
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return Response(
+        build_export_archive(subject_ids),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="experiment-{stamp}.zip"'},
+    )
+
+
+@app.get("/api/admin/sessions/{subject_id}/export.zip")
+def admin_export_subject(subject_id: str, _: None = Depends(require_admin)):
+    with transaction() as connection:
+        exists = connection.execute(select(sessions.c.subject_id).where(sessions.c.subject_id == subject_id)).first()
+    if not exists:
+        raise HTTPException(404, "Сессия не найдена")
+    return Response(
+        build_export_archive([subject_id]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{subject_id}.zip"'},
+    )

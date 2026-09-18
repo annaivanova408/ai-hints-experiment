@@ -4,7 +4,9 @@ import sqlite3
 import unittest
 from collections import Counter
 
-from app.main import CONFIG, CONDITIONS, build_assignment, constrained_conditions, validate_config
+from fastapi import HTTPException
+
+from app.main import CONFIG, CONDITIONS, build_assignment, constrained_conditions, create_admin_token, require_admin, validate_config
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -66,6 +68,15 @@ class ConfigurationTests(unittest.TestCase):
                 (json.dumps(assignment),),
             )
         self.assertEqual(sorted(selected), list(range(30)))
+
+    def test_admin_token_is_required_and_validated(self):
+        with self.assertRaises(HTTPException) as missing:
+            require_admin(None)
+        self.assertEqual(missing.exception.status_code, 401)
+        with self.assertRaises(HTTPException) as invalid:
+            require_admin("Bearer invalid")
+        self.assertEqual(invalid.exception.status_code, 401)
+        require_admin(f"Bearer {create_admin_token()}")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,10 @@
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY frontend/package.json ./
-RUN npm install
+RUN corepack enable && corepack prepare pnpm@10.16.1 --activate
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY frontend ./
-RUN npm run build
+RUN pnpm build
 
 FROM nginx:1.27-alpine
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf

@@ -32,6 +32,8 @@ services:
       MARKER_UDP_HOST: ${MARKER_UDP_HOST:-}
       MARKER_UDP_PORT: ${MARKER_UDP_PORT:-0}
       VALIDATE_MEDIA: ${VALIDATE_MEDIA:-true}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:-local-admin-secret}
     volumes:
       - experiment_data:/data
       - ./clips:/clips:ro

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Bot, Check, Lightbulb, Play, UserRound } from "lucide-react";
+import { ArrowRight, Bot, Check, Lightbulb, Play } from "lucide-react";
 import { api } from "./api";
 
 const LABELS = {AI: "Ответ ИИ-помощника", EXPERT: "Ответ эксперта", CONTROL: "Подсказка"};
@@ -36,8 +36,9 @@ function NasaScale({left,right,onCommit}) {
   </div>;
 }
 
-function Frame({children, eyebrow, progress, screen="service"}) {
-  return <div className={`study-screen screen-${screen}`} data-screen={screen}><div className="study-top"><span>{eyebrow}</span>{progress&&<span>{progress}</span>}</div><section className="study-card">{children}</section></div>;
+function Frame({children, eyebrow, progress, progressValue=0, screen="service"}) {
+  const showBar=!['video','fixation','recovery'].includes(screen);
+  return <div className={`study-screen screen-${screen}`} data-screen={screen}><div className="study-top"><span>{eyebrow}</span>{progress&&<span>{progress}</span>}</div>{showBar&&<div className="study-progress" aria-label={`Прогресс ${Math.round(progressValue)}%`}><i style={{width:`${Math.max(0,Math.min(100,progressValue))}%`}}/></div>}<section className="study-card">{children}</section></div>;
 }
 
 function Fixation({ms, segmentId, condition, emit, onDone}) {
@@ -48,20 +49,20 @@ function Fixation({ms, segmentId, condition, emit, onDone}) {
 }
 
 function conditionIcon(condition) {
-  if (condition === "AI") return <Bot size={48} strokeWidth={1.7}/>;
-  if (condition === "EXPERT") return <UserRound size={48} strokeWidth={1.7}/>;
-  return <Lightbulb size={48} strokeWidth={1.7}/>;
+  if (condition === "AI") return <Bot size={76} strokeWidth={2.4}/>;
+  if (condition === "EXPERT") return <img className="expert-portrait" src="/expert-portrait.png" alt="Эксперт"/>;
+  return <Lightbulb size={68} strokeWidth={2.3}/>;
 }
 
-function HintTrial({item, condition, settings, demo, practice=false, optionOrder, clipTiming={}, fixationAt, onDone, emit, save}) {
-  const [stage,setStage]=useState("question");
+function HintTrial({item, condition, settings, demo, practice=false, optionOrder, clipTiming={}, fixationAt, onDone, emit, save, initialStage="question", progressValue=0}) {
+  const [stage,setStage]=useState(initialStage);
   const [canClose,setCanClose]=useState(false);
   const closed=useRef(false);
   const ratingDone=useRef(false);
   const answerDone=useRef(false);
   const times=useRef({...clipTiming});
   const keys=optionOrder||Object.keys(item.options);
-  const duration=(name,value)=>demo?({hintMin:1200,hintMax:8000,rating:10000,recovery:1200,answer:30000}[name]):value;
+  const duration=(name,value)=>demo?({hintMin:300,hintMax:600000,rating:600000,recovery:400,answer:600000}[name]):value;
 
   useEffect(()=>{
     const timestamp=Date.now();
@@ -115,11 +116,11 @@ function HintTrial({item, condition, settings, demo, practice=false, optionOrder
   useDelay(stage==="recovery"?duration("recovery",settings.recovery_ms):null,()=>setStage("answer"),[stage]);
   useDelay(stage==="answer"?duration("answer",settings.probe_timeout_ms):null,()=>finishAnswer(null,true),[stage]);
 
-  if(stage==="question")return <Frame eyebrow={practice?"Тренировочное задание":"Вопрос по фрагменту"} screen="question"><div className="question-only"><h2 data-aoi="question_text">{item.stem}</h2><button data-aoi="hint_request_button" className="primary" onClick={beginHint}><Lightbulb size={20}/>Нужна подсказка</button></div></Frame>;
-  if(stage==="hint")return <Frame eyebrow={LABELS[condition]} screen="hint"><div className="hint-content"><div className="source-icon" data-aoi="source_icon">{conditionIcon(condition)}</div><h2 data-aoi="source_label">{LABELS[condition]}</h2><p data-aoi="hint_text">{item.hints[condition.toLowerCase()]}</p><button data-aoi="hint_continue_button" className="primary" disabled={!canClose} onClick={()=>closeHint(false)}>Продолжить <ArrowRight size={20}/></button></div></Frame>;
-  if(stage==="rating")return <Frame eyebrow="Оценка ответа" screen="satisfaction"><div className="rating-content"><h2 data-aoi="rating_question">Насколько полезным и удовлетворительным был для Вас этот ответ?</h2><Scale value={null} onChange={value=>finishRating(value,false)} left="Совсем не полезен" right="Максимально полезен"/></div></Frame>;
+  if(stage==="question")return <Frame eyebrow={practice?"Тренировочное задание":"Вопрос по фрагменту"} progressValue={progressValue} screen="question"><div className="question-only"><h2 data-aoi="question_text">{item.stem}</h2><button data-aoi="hint_request_button" className="primary" onClick={beginHint}>Далее <ArrowRight size={20}/></button></div></Frame>;
+  if(stage==="hint")return <Frame eyebrow={LABELS[condition]} progressValue={progressValue} screen="hint"><div className="hint-content"><div className={`source-icon source-${condition.toLowerCase()}`} data-aoi="source_icon">{conditionIcon(condition)}</div><h2 data-aoi="source_label">{LABELS[condition]}</h2><p data-aoi="hint_text">{item.hints[condition.toLowerCase()]}</p><button data-aoi="hint_continue_button" className="primary" disabled={!canClose} onClick={()=>closeHint(false)}>Продолжить <ArrowRight size={20}/></button></div></Frame>;
+  if(stage==="rating")return <Frame eyebrow="Оценка ответа" progressValue={progressValue} screen="satisfaction"><div className="rating-content"><h2 data-aoi="rating_question">Насколько полезным и удовлетворительным был для Вас этот ответ?</h2><Scale value={null} onChange={value=>finishRating(value,false)} left="Совсем не полезен" right="Максимально полезен"/></div></Frame>;
   if(stage==="recovery")return <Frame eyebrow="" screen="recovery"><div className="fixation" data-aoi="fixation_cross">+</div></Frame>;
-  return <Frame eyebrow={practice?"Тренировочное задание":"Выберите ответ"} screen="answer"><div className="answer-content"><h2 data-aoi="question_text">{item.stem}</h2><div className="options">{keys.map((key,index)=><button data-aoi={`answer_option_${index+1}`} key={key} onClick={()=>finishAnswer(key,false)}><span>{index+1}</span>{item.options[key]}</button>)}</div></div></Frame>;
+  return <Frame eyebrow={practice?"Тренировочное задание":"Выберите ответ"} progressValue={progressValue} screen="answer"><div className="answer-content"><h2 data-aoi="question_text">{item.stem}</h2><div className="options">{keys.map((key,index)=><button data-aoi={`answer_option_${index+1}`} key={key} onClick={()=>finishAnswer(key,false)}><span>{index+1}</span>{item.options[key]}</button>)}</div></div></Frame>;
 }
 
 function VideoClip({clip,demo,onDone,emit,videoId,videoPosition,index,total,nextFile,practice=false}) {
@@ -144,12 +145,12 @@ function VideoClip({clip,demo,onDone,emit,videoId,videoPosition,index,total,next
 
 function Calibration({emit,onDone}) {
   useEffect(()=>{emit(11,"calibration_start");},[]);
-  return <Frame eyebrow="Подготовка оборудования" screen="operator"><div className="operator"><h2>Калибровка айтрекера</h2><p>Выполните калибровку на оборудовании перед продолжением исследования.</p><button className="primary" onClick={()=>{emit(12,"calibration_end",{payload:{accuracy_recorded:false}});onDone({accuracy_recorded:false});}}>Далее <ArrowRight size={20}/></button></div></Frame>;
+  return <Frame eyebrow="Подготовка оборудования" progressValue={10} screen="operator"><div className="operator"><h2>Калибровка айтрекера</h2><p>Выполните калибровку на оборудовании перед продолжением исследования.</p><button className="primary" onClick={()=>{emit(12,"calibration_end",{payload:{accuracy_recorded:false}});onDone({accuracy_recorded:false});}}>Далее <ArrowRight size={20}/></button></div></Frame>;
 }
 
 function DriftCheck({emit,onDone}) {
   const [values,setValues]=useState({error_x:"",error_y:""});
-  return <Frame eyebrow="Проверка оборудования" screen="operator"><div className="operator"><h2>Проверка положения взгляда</h2><p>Выполните drift-check и внесите значения с оборудования.</p><div className="calibration-fields"><label>Смещение по X, °<input type="number" step="0.01" value={values.error_x} onChange={event=>setValues({...values,error_x:event.target.value})}/></label><label>Смещение по Y, °<input type="number" step="0.01" value={values.error_y} onChange={event=>setValues({...values,error_y:event.target.value})}/></label></div><button className="primary" disabled={values.error_x===""||values.error_y===""} onClick={()=>{emit(13,"drift_check",{payload:values});onDone(values);}}>Проверка завершена <ArrowRight size={20}/></button></div></Frame>;
+  return <Frame eyebrow="Проверка оборудования" progressValue={12} screen="operator"><div className="operator"><h2>Проверка положения взгляда</h2><p>Выполните drift-check и внесите значения с оборудования.</p><div className="calibration-fields"><label>Смещение по X, °<input type="number" step="0.01" value={values.error_x} onChange={event=>setValues({...values,error_x:event.target.value})}/></label><label>Смещение по Y, °<input type="number" step="0.01" value={values.error_y} onChange={event=>setValues({...values,error_y:event.target.value})}/></label></div><button className="primary" disabled={values.error_x===""||values.error_y===""} onClick={()=>{emit(13,"drift_check",{payload:values});onDone(values);}}>Проверка завершена <ArrowRight size={20}/></button></div></Frame>;
 }
 
 function FinalTest({config,session,demo,onDone,emit,save}) {
@@ -170,8 +171,8 @@ function FinalTest({config,session,demo,onDone,emit,save}) {
     emit(82,"final_answer",{segment_id:item.segment_id,condition,payload});
     position+1<order.length?setPosition(position+1):onDone();
   };
-  useDelay(demo?15000:config.settings.final_test_timeout_ms,()=>answer(null,true),[position]);
-  return <Frame eyebrow="Итоговый тест" progress={`${position+1} из ${order.length}`} screen="final-test"><div className="answer-content"><h2 data-aoi="question_text">{item.stem}</h2><div className="options">{session.assignment.option_orders[item.id].map((key,index)=><button data-aoi={`answer_option_${index+1}`} key={key} onClick={()=>answer(key,false)}><span>{index+1}</span>{item.options[key]}</button>)}</div></div></Frame>;
+  useDelay(demo?600000:config.settings.final_test_timeout_ms,()=>answer(null,true),[position]);
+  return <Frame eyebrow="Итоговый тест" progress={`${position+1} из ${order.length}`} progressValue={66+(position+1)/order.length*16} screen="final-test"><div className="answer-content"><h2 data-aoi="question_text">{item.stem}</h2><div className="options">{session.assignment.option_orders[item.id].map((key,index)=><button data-aoi={`answer_option_${index+1}`} key={key} onClick={()=>answer(key,false)}><span>{index+1}</span>{item.options[key]}</button>)}</div></div></Frame>;
 }
 
 function NASA({config,session,onDone,save,emit}) {
@@ -191,7 +192,7 @@ function NASA({config,session,onDone,save,emit}) {
     else if(block+1<3){setBlock(block+1);setItemPosition(0);}
     else onDone();
   };
-  return <Frame eyebrow="Оценка нагрузки" progress={`Блок ${block+1} из 3`} screen="nasa"><div className="nasa"><p className="nasa-instruction">{NASA_INSTRUCTIONS[condition]}</p><h2>{item.title}</h2><p>{item.text}</p><NasaScale key={`${condition}-${item.id}`} left={item.left} right={item.right} onCommit={answer}/></div></Frame>;
+  return <Frame eyebrow="Оценка нагрузки" progress={`Блок ${block+1} из 3`} progressValue={83+((block*config.nasa.length+itemPosition+1)/(config.nasa.length*3))*13} screen="nasa"><div className="nasa"><p className="nasa-instruction">{NASA_INSTRUCTIONS[condition]}</p><h2>{item.title}</h2><p>{item.text}</p><NasaScale key={`${condition}-${item.id}`} left={item.left} right={item.right} onCommit={answer}/></div></Frame>;
 }
 
 export default function Experiment({config,initialSession,demo,onFinish}) {
@@ -205,13 +206,15 @@ export default function Experiment({config,initialSession,demo,onFinish}) {
   const save=(type,key,payload)=>api.record(subject,type,key,payload);
   useEffect(()=>{if(!state.session_started){emit(10,"session_start",{payload:{config_version:config.config_version}});persist({...state,session_started:true});}},[]);
 
+  if(phase==="task_instruction")return <Frame eyebrow="Инструкция к заданию" progressValue={3} screen="service"><div className="operator task-instruction"><h2>Как будет проходить задание</h2><p>Вы посмотрите 3 видео, разделённые на 27 смысловых фрагментов.</p><ol><li>После каждого фрагмента появится вопрос.</li><li>Нажмите единственную активную кнопку «Далее» и внимательно прочитайте обязательную подсказку.</li><li>После короткой паузы выберите один вариант ответа.</li></ol><button className="primary" onClick={()=>persist({screen:"experiment",phase:"practice_intro"})}>Далее <ArrowRight size={20}/></button></div></Frame>;
+  if(phase==="practice_intro")return <Frame eyebrow="Перед тренировкой" progressValue={5} screen="service"><div className="operator practice-instruction"><h2>Тренировочное задание</h2><ul><li>Сначала вы увидите фигуру на экране.</li><li>Затем вам будет предложено прочитать текст.</li><li>После этого оцените полученную подсказку и ответьте на вопрос.</li></ul><button className="primary" onClick={()=>persist({screen:"experiment",phase:"practice",step:0,trialStage:"clip"})}>Начать тренировку <ArrowRight size={20}/></button></div></Frame>;
   if(phase==="practice"){
     const position=state.step||0;
     const item=PRACTICE[position];
     const clip={file:item.clip_file,duration_sec:item.duration_sec,segment_id:item.id};
     if((state.trialStage||"clip")==="clip")return <VideoClip key={clip.file} clip={clip} demo={demo} practice videoId="practice" videoPosition={0} index={position} total={2} nextFile={position===0?PRACTICE[1].clip_file:null} emit={emit} onDone={clipTiming=>persist({...state,trialStage:"fixation",clipTiming})}/>;
     if(state.trialStage==="fixation")return <Fixation ms={demo?700:config.settings.fixation_ms} segmentId={item.id} condition={position===0?"AI":"EXPERT"} emit={emit} onDone={fixationAt=>persist({...state,trialStage:"trial",fixationAt})}/>;
-    return <HintTrial key={item.id} item={item} condition={position===0?"AI":"EXPERT"} settings={config.settings} demo={demo} practice clipTiming={state.clipTiming} fixationAt={state.fixationAt} emit={emit} save={save} onDone={()=>position+1<PRACTICE.length?persist({...state,step:position+1,trialStage:"clip",clipTiming:null,fixationAt:null}):persist({screen:"experiment",phase:"calibration",videoPos:0})}/>;
+    return <HintTrial key={`${item.id}-${state.demoTrialStage||"question"}`} item={item} condition={position===0?"AI":"EXPERT"} settings={config.settings} demo={demo} practice initialStage={state.demoTrialStage||"question"} progressValue={6+position*2} clipTiming={state.clipTiming} fixationAt={state.fixationAt} emit={emit} save={save} onDone={()=>position+1<PRACTICE.length?persist({...state,step:position+1,trialStage:"clip",clipTiming:null,fixationAt:null,demoTrialStage:null}):persist({screen:"experiment",phase:"calibration",videoPos:0})}/>;
   }
   if(phase==="calibration")return <Calibration emit={emit} onDone={values=>persist({screen:"experiment",phase:"video",videoPos:state.videoPos||0,clipPos:0,trialStage:"clip",calibration:values})}/>;
   if(phase==="drift")return <DriftCheck emit={emit} onDone={values=>persist({...state,phase:"video",clipPos:0,trialStage:"clip",drift:values})}/>;
@@ -221,22 +224,25 @@ export default function Experiment({config,initialSession,demo,onFinish}) {
     const clip=video.clips[state.clipPos];
     const segment=clip.segment_id?config.segments.find(candidate=>candidate.id===clip.segment_id):null;
     const nextFile=video.clips[state.clipPos+1]?.file;
+    const earlierSegments=session.assignment.video_order.slice(0,state.videoPos).reduce((sum,id)=>sum+config.segments.filter(item=>item.video_id===id).length,0);
+    const segmentPosition=earlierSegments+Math.max(0,video.clips.slice(0,state.clipPos+1).filter(item=>item.segment_id).length);
+    const segmentProgress=12+(segmentPosition/config.segments.length)*50;
     const finishVideo=()=>{emit(21,"video_offset",{payload:{video_id:videoId,order_position:state.videoPos+1}});persist({...state,phase:"learnability"});};
     const nextClip=()=>{const next=state.clipPos+1;next<video.clips.length?persist({...state,clipPos:next,trialStage:"clip",clipTiming:null,fixationAt:null}):finishVideo();};
     if((state.trialStage||"clip")==="clip")return <VideoClip key={clip.file} clip={clip} demo={demo} videoId={videoId} videoPosition={state.videoPos+1} index={state.clipPos} total={video.clips.length} nextFile={nextFile} emit={emit} onDone={clipTiming=>segment?persist({...state,trialStage:"fixation",clipTiming}):finishVideo()}/>;
     const condition=session.assignment.segment_conditions[segment.id];
     if(state.trialStage==="fixation")return <Fixation ms={demo?700:config.settings.fixation_ms} segmentId={segment.id} condition={condition} emit={emit} onDone={fixationAt=>persist({...state,trialStage:"trial",fixationAt})}/>;
-    return <HintTrial key={segment.id} item={segment} condition={condition} optionOrder={session.assignment.option_orders[segment.id]} settings={config.settings} demo={demo} clipTiming={state.clipTiming} fixationAt={state.fixationAt} emit={emit} save={save} onDone={nextClip}/>;
+    return <HintTrial key={`${segment.id}-${state.demoTrialStage||"question"}`} item={segment} condition={condition} optionOrder={session.assignment.option_orders[segment.id]} settings={config.settings} demo={demo} initialStage={state.demoTrialStage||"question"} progressValue={segmentProgress} clipTiming={state.clipTiming} fixationAt={state.fixationAt} emit={emit} save={save} onDone={nextClip}/>;
   }
-  if(phase==="learnability")return <Frame eyebrow="Оценка видео" screen="learnability"><div className="rating-content"><h2>Насколько легко Вам было усвоить материал этого видео?</h2><Scale value={scaleValue} onChange={setScaleValue} left="Очень тяжело" right="Очень легко"/><button className="primary" disabled={!scaleValue} onClick={async()=>{const videoId=session.assignment.video_order[state.videoPos];await save("video_rating",videoId,{value:scaleValue});emit(70,"video_rating",{payload:{value:scaleValue,video_id:videoId}});setScaleValue(null);state.videoPos+1<3?persist({screen:"experiment",phase:"drift",videoPos:state.videoPos+1}):persist({screen:"experiment",phase:"final_intro"});}}>Продолжить <ArrowRight size={20}/></button></div></Frame>;
-  if(phase==="final_intro")return <Frame eyebrow="Заключительная часть" screen="service"><div className="operator"><h2>Итоговый тест</h2><p>Далее появятся 27 вопросов по содержанию трёх видео. На каждый вопрос отводится до 60 секунд. Ответ фиксируется одним нажатием. Вернуться к предыдущему вопросу нельзя.</p><button className="primary" onClick={()=>persist({screen:"experiment",phase:"final"})}>Начать тест <ArrowRight size={20}/></button></div></Frame>;
+  if(phase==="learnability")return <Frame eyebrow="Оценка видео" progressValue={12+((state.videoPos+1)/3)*50} screen="learnability"><div className="rating-content"><h2>Насколько легко Вам было усвоить материал этого видео?</h2><Scale value={scaleValue} onChange={setScaleValue} left="Очень тяжело" right="Очень легко"/><button className="primary" disabled={!scaleValue} onClick={async()=>{const videoId=session.assignment.video_order[state.videoPos];await save("video_rating",videoId,{value:scaleValue});emit(70,"video_rating",{payload:{value:scaleValue,video_id:videoId}});setScaleValue(null);state.videoPos+1<3?persist({screen:"experiment",phase:"drift",videoPos:state.videoPos+1}):persist({screen:"experiment",phase:"final_intro"});}}>Продолжить <ArrowRight size={20}/></button></div></Frame>;
+  if(phase==="final_intro")return <Frame eyebrow="Заключительная часть" progressValue={65} screen="service"><div className="operator"><h2>Итоговый тест</h2><p>Далее появятся 27 вопросов по содержанию трёх видео. На каждый вопрос отводится до 60 секунд. Ответ фиксируется одним нажатием. Вернуться к предыдущему вопросу нельзя.</p><button className="primary" onClick={()=>persist({screen:"experiment",phase:"final"})}>Начать тест <ArrowRight size={20}/></button></div></Frame>;
   if(phase==="final")return <FinalTest config={config} session={session} demo={demo} emit={emit} save={save} onDone={()=>persist({screen:"experiment",phase:"nasa"})}/>;
   if(phase==="nasa")return <NASA config={config} session={session} emit={emit} save={save} onDone={()=>persist({screen:"experiment",phase:"manipulation",manipulationPos:0})}/>;
   if(phase==="manipulation"){
     const questions=[{key:"ai",text:"Насколько вероятно, что подсказки с пометкой «ИИ-помощник» были подготовлены искусственным интеллектом?"},{key:"expert",text:"Насколько вероятно, что подсказки с пометкой «Эксперт» были подготовлены человеком?"}];
     const position=state.manipulationPos||0;
     const question=questions[position];
-    return <Frame eyebrow="Завершающие вопросы" progress={`${position+1} из 2`} screen="manipulation"><div className="rating-content"><h2>{question.text}</h2><Scale value={scaleValue} onChange={setScaleValue} left="Совсем не вероятно" right="Очень вероятно"/><button className="primary" disabled={!scaleValue} onClick={async()=>{await save("manipulation",question.key,{value:scaleValue});emit(95,"manipulation_answer",{payload:{key:question.key,value:scaleValue}});setScaleValue(null);position===0?persist({...state,manipulationPos:1}):persist({screen:"experiment",phase:"debrief"});}}>Продолжить <ArrowRight size={20}/></button></div></Frame>;
+    return <Frame eyebrow="Завершающие вопросы" progress={`${position+1} из 2`} progressValue={97+position} screen="manipulation"><div className="rating-content"><h2>{question.text}</h2><Scale value={scaleValue} onChange={setScaleValue} left="Совсем не вероятно" right="Очень вероятно"/><button className="primary" disabled={!scaleValue} onClick={async()=>{await save("manipulation",question.key,{value:scaleValue});emit(95,"manipulation_answer",{payload:{key:question.key,value:scaleValue}});setScaleValue(null);position===0?persist({...state,manipulationPos:1}):persist({screen:"experiment",phase:"debrief"});}}>Продолжить <ArrowRight size={20}/></button></div></Frame>;
   }
-  return <Frame eyebrow="Информация об исследовании" screen="debrief"><div className="operator"><h2>Спасибо за участие</h2><p>В исследовании сравнивались три типа заранее подготовленных подсказок. Их обозначения использовались как часть экспериментальной процедуры и не обязательно отражали реальный источник текста.</p><button className="primary" onClick={async()=>{emit(99,"session_end",{payload:{config_version:config.config_version}});await api.complete(subject);const next={...session,status:"completed",state:{screen:"completed"}};await api.state(subject,next.state);if(document.fullscreenElement)await document.exitFullscreen().catch(()=>{});onFinish(next);}}>Завершить <Check size={20}/></button></div></Frame>;
+  return <Frame eyebrow="Информация об исследовании" progressValue={100} screen="debrief"><div className="operator"><h2>Спасибо за участие</h2><p>В исследовании сравнивались три типа заранее подготовленных подсказок. Их обозначения использовались как часть экспериментальной процедуры и не обязательно отражали реальный источник текста.</p><button className="primary" onClick={async()=>{emit(99,"session_end",{payload:{config_version:config.config_version}});await api.complete(subject);const next={...session,status:"completed",state:{screen:"completed"}};await api.state(subject,next.state);if(document.fullscreenElement)await document.exitFullscreen().catch(()=>{});onFinish(next);}}>Завершить <Check size={20}/></button></div></Frame>;
 }

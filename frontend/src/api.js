@@ -29,4 +29,19 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}/events`, {method: "POST", body: JSON.stringify({timestamp_unix_ms: Date.now(), timestamp_monotonic_ms: performance.now(), event_code, event_name, segment_id: details.segment_id || null, condition: details.condition || null, payload})});
   },
   complete: id => request(`/api/sessions/${encodeURIComponent(id)}/complete`, {method: "POST"}),
+  adminLogin: password => request("/api/admin/login", {method: "POST", body: JSON.stringify({password})}),
+  adminSessions: token => request("/api/admin/sessions", {headers: {Authorization: `Bearer ${token}`}}),
 };
+
+export async function downloadAdminExport(path, token, fallbackName) {
+  const response = await fetch(path, {headers: {Authorization: `Bearer ${token}`}});
+  if (!response.ok) throw new Error(response.status === 401 ? "Сессия администратора истекла" : "Не удалось подготовить выгрузку");
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] || fallbackName;
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}

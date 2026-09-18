@@ -1,0 +1,113 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_hints}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_hints}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *default-logging
+
+  migrate:
+    image: ai-hints-experiment-backend
+    restart: "no"
+    command: ["python", "-c", "from app.database import init_db; init_db()"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_hints}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-ai_hints}
+      VALIDATE_MEDIA: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+    logging: *default-logging
+
+  media-seed:
+    image: ai-hints-experiment-backend
+    restart: "no"
+    command: ["python", "-m", "app.seed_clips"]
+    environment:
+      CLIPS_PATH: /clips
+      CLIPS_SOURCE_BASE_URL: ${CLIPS_SOURCE_BASE_URL:?CLIPS_SOURCE_BASE_URL is required}
+    volumes:
+      - clips_data:/clips
+    networks:
+      - dokploy-network
+    logging: *default-logging
+
+  backend:
+    image: ai-hints-experiment-backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ai_hints}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-ai_hints}
+      CLIPS_PATH: /clips
+      VALIDATE_MEDIA: ${VALIDATE_MEDIA:-true}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      ADMIN_SECRET_KEY: ${ADMIN_SECRET_KEY:?ADMIN_SECRET_KEY is required}
+      MARKER_UDP_HOST: ${MARKER_UDP_HOST:-}
+      MARKER_UDP_PORT: ${MARKER_UDP_PORT:-0}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      media-seed:
+        condition: service_completed_successfully
+    volumes:
+      - clips_data:/clips:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      internal:
+      dokploy-network:
+        aliases:
+          - hints-web
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/api/health"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 10s
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  clips_data:
+
+networks:
+  internal:
+    internal: true
+  dokploy-network:
+    external: true
