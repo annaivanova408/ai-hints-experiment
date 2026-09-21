@@ -29,3 +29,10 @@ Append-only deployment and verification record.
   - All 32 clips return 200; `Range: bytes=0-1023` on `practice_1.mp4` returns 206 with 1024 bytes.
   - `GET /api/admin/sessions` without a token returns 401.
 - Skill version check against the registry was not performed for this session; the local `dokploy` skill copy was used as installed.
+
+## 2026-09-21 - Deploy "hints -> comments" rename to nlab-prod-sbercloud
+
+- `compose.deploy` on compose `hints` (`Lbv2rld4UXieA9wBkrfO_`), fetched commit `8ab6579` (rename of "подсказка" to "комментарий" across all user-facing/data text, see the commit for full list).
+- Verification: `GET /`, `/api/health`, `/admin` all 200; downloaded the served JS bundle and confirmed 0 occurrences of "подсказк" and the exact new instruction text ("будет показан обязательный комментарий...") present.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
