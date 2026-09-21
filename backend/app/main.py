@@ -43,7 +43,7 @@ ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", ADMIN_PASSWORD)
 ADMIN_TOKEN_TTL_SEC = 12 * 60 * 60
 
 
-app = FastAPI(title="Эксперимент с подсказками", version="0.1.0")
+app = FastAPI(title="Эксперимент с комментариями", version="0.1.0")
 CLIPS_PATH = Path(os.getenv("CLIPS_PATH", PROJECT_ROOT / "clips"))
 app.mount("/clips", StaticFiles(directory=CLIPS_PATH, check_dir=False), name="clips")
 
@@ -198,7 +198,7 @@ def validate_config() -> None:
             errors.append(f"{item['id']}: верный ответ отсутствует среди вариантов")
         for condition in ("ai", "expert", "control"):
             if not item["hints"].get(condition):
-                errors.append(f"{item['id']}: отсутствует подсказка {condition}")
+                errors.append(f"{item['id']}: отсутствует комментарий {condition}")
         ai_words = len(item["hints"]["ai"].split())
         expert_words = len(item["hints"]["expert"].split())
         if max(ai_words, expert_words) and abs(ai_words - expert_words) / max(ai_words, expert_words) > 0.2:

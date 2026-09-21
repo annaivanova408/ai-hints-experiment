@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Bot, Check, Lightbulb, Play } from "lucide-react";
 import { api } from "./api";
 
-const LABELS = {AI: "Ответ ИИ-помощника", EXPERT: "Ответ эксперта", CONTROL: "Подсказка"};
+const LABELS = {AI: "Ответ ИИ-помощника", EXPERT: "Ответ эксперта", CONTROL: "Комментарий"};
 const NASA_INSTRUCTIONS = {
-  AI: "Вспомните те моменты просмотра, когда подсказку Вам давал ИИ-помощник. Оцените свои ощущения именно в эти моменты.",
-  EXPERT: "Вспомните те моменты просмотра, когда подсказку Вам давал эксперт. Оцените свои ощущения именно в эти моменты.",
-  CONTROL: "Вспомните те задания, где подсказка предлагала подумать над ответом самостоятельно. Оцените свои ощущения именно в эти моменты.",
+  AI: "Вспомните те моменты просмотра, когда комментарий Вам давал ИИ-помощник. Оцените свои ощущения именно в эти моменты.",
+  EXPERT: "Вспомните те моменты просмотра, когда комментарий Вам давал эксперт. Оцените свои ощущения именно в эти моменты.",
+  CONTROL: "Вспомните те задания, где комментарий предлагал подумать над ответом самостоятельно. Оцените свои ощущения именно в эти моменты.",
 };
 const PRACTICE = [
   {id:"P1", clip_file:"practice_1.mp4", duration_sec:8, stem:"Какая фигура появилась в начале фрагмента?", options:{A:"Круг",B:"Квадрат",C:"Треугольник",D:"Линия"}, correct:"B", hints:{ai:"Вспомните первые секунды: в центре была фигура с четырьмя равными сторонами.",expert:"Мысленно вернитесь к началу: первой была фигура с четырьмя равными сторонами.",control:"Вспомните начало фрагмента и выберите вариант, который считаете верным."}},
@@ -206,8 +206,8 @@ export default function Experiment({config,initialSession,demo,onFinish}) {
   const save=(type,key,payload)=>api.record(subject,type,key,payload);
   useEffect(()=>{if(!state.session_started){emit(10,"session_start",{payload:{config_version:config.config_version}});persist({...state,session_started:true});}},[]);
 
-  if(phase==="task_instruction")return <Frame eyebrow="Инструкция к заданию" progressValue={3} screen="service"><div className="operator task-instruction"><h2>Как будет проходить задание</h2><p>Вы посмотрите 3 видео, разделённые на 27 смысловых фрагментов.</p><ol><li>После каждого фрагмента появится вопрос.</li><li>Нажмите единственную активную кнопку «Далее» и внимательно прочитайте обязательную подсказку.</li><li>После короткой паузы выберите один вариант ответа.</li></ol><button className="primary" onClick={()=>persist({screen:"experiment",phase:"practice_intro"})}>Далее <ArrowRight size={20}/></button></div></Frame>;
-  if(phase==="practice_intro")return <Frame eyebrow="Перед тренировкой" progressValue={5} screen="service"><div className="operator practice-instruction"><h2>Тренировочное задание</h2><ul><li>Сначала вы увидите фигуру на экране.</li><li>Затем вам будет предложено прочитать текст.</li><li>После этого оцените полученную подсказку и ответьте на вопрос.</li></ul><button className="primary" onClick={()=>persist({screen:"experiment",phase:"practice",step:0,trialStage:"clip"})}>Начать тренировку <ArrowRight size={20}/></button></div></Frame>;
+  if(phase==="task_instruction")return <Frame eyebrow="Инструкция к заданию" progressValue={3} screen="service"><div className="operator task-instruction"><h2>Как будет проходить задание</h2><p>Вы посмотрите 3 видео, разделённые на 27 смысловых фрагментов.</p><ol><li>После каждого фрагмента появится вопрос.</li><li>Нажмите единственную активную кнопку «Далее» и внимательно прочитайте обязательный комментарий.</li><li>После короткой паузы выберите один вариант ответа.</li></ol><button className="primary" onClick={()=>persist({screen:"experiment",phase:"practice_intro"})}>Далее <ArrowRight size={20}/></button></div></Frame>;
+  if(phase==="practice_intro")return <Frame eyebrow="Перед тренировкой" progressValue={5} screen="service"><div className="operator practice-instruction"><h2>Тренировочное задание</h2><ul><li>Сначала вы увидите фигуру на экране.</li><li>Затем вам будет предложено прочитать текст.</li><li>После этого оцените полученный комментарий и ответьте на вопрос.</li></ul><button className="primary" onClick={()=>persist({screen:"experiment",phase:"practice",step:0,trialStage:"clip"})}>Начать тренировку <ArrowRight size={20}/></button></div></Frame>;
   if(phase==="practice"){
     const position=state.step||0;
     const item=PRACTICE[position];
@@ -239,10 +239,10 @@ export default function Experiment({config,initialSession,demo,onFinish}) {
   if(phase==="final")return <FinalTest config={config} session={session} demo={demo} emit={emit} save={save} onDone={()=>persist({screen:"experiment",phase:"nasa"})}/>;
   if(phase==="nasa")return <NASA config={config} session={session} emit={emit} save={save} onDone={()=>persist({screen:"experiment",phase:"manipulation",manipulationPos:0})}/>;
   if(phase==="manipulation"){
-    const questions=[{key:"ai",text:"Насколько вероятно, что подсказки с пометкой «ИИ-помощник» были подготовлены искусственным интеллектом?"},{key:"expert",text:"Насколько вероятно, что подсказки с пометкой «Эксперт» были подготовлены человеком?"}];
+    const questions=[{key:"ai",text:"Насколько вероятно, что комментарии с пометкой «ИИ-помощник» были подготовлены искусственным интеллектом?"},{key:"expert",text:"Насколько вероятно, что комментарии с пометкой «Эксперт» были подготовлены человеком?"}];
     const position=state.manipulationPos||0;
     const question=questions[position];
     return <Frame eyebrow="Завершающие вопросы" progress={`${position+1} из 2`} progressValue={97+position} screen="manipulation"><div className="rating-content"><h2>{question.text}</h2><Scale value={scaleValue} onChange={setScaleValue} left="Совсем не вероятно" right="Очень вероятно"/><button className="primary" disabled={!scaleValue} onClick={async()=>{await save("manipulation",question.key,{value:scaleValue});emit(95,"manipulation_answer",{payload:{key:question.key,value:scaleValue}});setScaleValue(null);position===0?persist({...state,manipulationPos:1}):persist({screen:"experiment",phase:"debrief"});}}>Продолжить <ArrowRight size={20}/></button></div></Frame>;
   }
-  return <Frame eyebrow="Информация об исследовании" progressValue={100} screen="debrief"><div className="operator"><h2>Спасибо за участие</h2><p>В исследовании сравнивались три типа заранее подготовленных подсказок. Их обозначения использовались как часть экспериментальной процедуры и не обязательно отражали реальный источник текста.</p><button className="primary" onClick={async()=>{emit(99,"session_end",{payload:{config_version:config.config_version}});await api.complete(subject);const next={...session,status:"completed",state:{screen:"completed"}};await api.state(subject,next.state);if(document.fullscreenElement)await document.exitFullscreen().catch(()=>{});onFinish(next);}}>Завершить <Check size={20}/></button></div></Frame>;
+  return <Frame eyebrow="Информация об исследовании" progressValue={100} screen="debrief"><div className="operator"><h2>Спасибо за участие</h2><p>В исследовании сравнивались три типа заранее подготовленных комментариев. Их обозначения использовались как часть экспериментальной процедуры и не обязательно отражали реальный источник текста.</p><button className="primary" onClick={async()=>{emit(99,"session_end",{payload:{config_version:config.config_version}});await api.complete(subject);const next={...session,status:"completed",state:{screen:"completed"}};await api.state(subject,next.state);if(document.fullscreenElement)await document.exitFullscreen().catch(()=>{});onFinish(next);}}>Завершить <Check size={20}/></button></div></Frame>;
 }
