@@ -71,7 +71,7 @@ function DemoNavigator({session,onNavigate}) {
 }
 
 function Finish({session,onNew}) {
-  return <section className="panel prose center instructions-panel"><div className="instruction-progress"><i style={{width:"100%"}}/></div><div className="success" aria-label="Готово"><Check size={30} strokeWidth={2.5}/></div><h1>Спасибо за участие!</h1><p>Исследование завершено.</p><button className="primary" onClick={onNew}>Следующий участник <ArrowRight size={20}/></button></section>;
+  return <section className="panel prose center instructions-panel"><div className="instruction-progress"><i style={{width:"100%"}}/></div><div className="success" aria-label="Готово"><Check size={30} strokeWidth={2.5}/></div><h1>Спасибо за участие!</h1><p>Исследование завершено.</p><button className="primary" onClick={onNew}>Начать заново <ArrowRight size={20}/></button></section>;
 }
 
 export default function App() {
