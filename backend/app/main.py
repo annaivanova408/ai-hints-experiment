@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from mutagen.mp4 import MP4
 from pydantic import BaseModel, Field
-from sqlalchemy import func, insert, select, text, update
+from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -550,6 +550,115 @@ def admin_export_all(_: None = Depends(require_admin)):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="experiment-{stamp}.zip"'},
     )
+
+
+NASA_TITLES = {item["id"]: item["title"] for item in CONFIG["nasa"]}
+MANIPULATION_TITLES = {
+    "ai": "Комментарии «ИИ-помощник» действительно от ИИ",
+    "expert": "Комментарии «Эксперт» действительно от человека",
+}
+
+
+def _answer_row(item, condition, answer, rating):
+    """Один вопрос глазами исследователя: что показали и что отметил участник."""
+    options = item["options"]
+    selected = (answer or {}).get("selected")
+    return {
+        "id": item["id"],
+        "segment_id": item.get("segment_id", item["id"]),
+        "video_id": item["video_id"],
+        "topic": item.get("topic"),
+        "condition": condition,
+        "stem": item["stem"],
+        "answered": bool(answer),
+        "selected": selected,
+        "selected_text": options.get(selected) if selected else None,
+        "correct": item["correct"],
+        "correct_text": options.get(item["correct"]),
+        "is_correct": (answer or {}).get("is_correct"),
+        "timeout": (answer or {}).get("timeout", False),
+        "rt_ms": (answer or {}).get("rt_ms"),
+        "satisfaction": (rating or {}).get("value"),
+    }
+
+
+@app.get("/api/admin/sessions/{subject_id}/detail")
+def admin_session_detail(subject_id: str, _: None = Depends(require_admin)):
+    """Всё, что участник отметил, по порядку прохождения."""
+    session, result_rows = session_and_records(subject_id)
+    assignment = decode_json(session["assignment_json"])
+    conditions = assignment.get("segment_conditions", {})
+    by_type: dict[str, dict[str, Any]] = {}
+    for row in result_rows:
+        by_type.setdefault(row["record_type"], {})[row["record_key"]] = decode_json(row["payload_json"])
+
+    segments = []
+    for video_position, video_id in enumerate(assignment["video_order"], start=1):
+        for segment in [item for item in CONFIG["segments"] if item["video_id"] == video_id]:
+            segments.append({
+                **_answer_row(
+                    segment,
+                    conditions.get(segment["id"]),
+                    by_type.get("segment_answer", {}).get(segment["id"]),
+                    by_type.get("hint_rating", {}).get(segment["id"]),
+                ),
+                "video_position": video_position,
+                "within_video": segment["within_video"],
+            })
+
+    final = [
+        _answer_row(
+            item,
+            conditions.get(item["segment_id"]),
+            by_type.get("final_answer", {}).get(item["id"]),
+            None,
+        )
+        for item in CONFIG["final_test"]
+    ]
+
+    video_ratings = [
+        {"video_id": video_id, "position": position, "value": (by_type.get("video_rating", {}).get(video_id) or {}).get("value")}
+        for position, video_id in enumerate(assignment["video_order"], start=1)
+    ]
+    nasa = [
+        {"key": key, "condition": payload.get("condition"), "item_id": payload.get("item_id"),
+         "title": NASA_TITLES.get(payload.get("item_id"), payload.get("item_id")), "value": payload.get("value")}
+        for key, payload in sorted(by_type.get("nasa", {}).items())
+    ]
+    manipulation = [
+        {"key": key, "title": MANIPULATION_TITLES.get(key, key), "value": payload.get("value")}
+        for key, payload in sorted(by_type.get("manipulation", {}).items())
+    ]
+
+    answered = sum(1 for item in segments if item["answered"])
+    correct = sum(1 for item in segments if item["is_correct"])
+    final_answered = sum(1 for item in final if item["answered"])
+    final_correct = sum(1 for item in final if item["is_correct"])
+    return {
+        "session": session_out(session),
+        "totals": {
+            "segments": len(segments), "segments_answered": answered, "segments_correct": correct,
+            "final": len(final), "final_answered": final_answered, "final_correct": final_correct,
+        },
+        "segments": segments,
+        "final": final,
+        "video_ratings": video_ratings,
+        "nasa": nasa,
+        "manipulation": manipulation,
+    }
+
+
+@app.delete("/api/admin/sessions/{subject_id}")
+def admin_delete_session(subject_id: str, _: None = Depends(require_admin)):
+    """Полное удаление участника: сессия, её события и ответы. Необратимо."""
+    with transaction() as connection:
+        exists = connection.execute(select(sessions.c.subject_id).where(sessions.c.subject_id == subject_id)).first()
+        if not exists:
+            raise HTTPException(404, "Сессия не найдена")
+        deleted_events = connection.execute(delete(events).where(events.c.subject_id == subject_id)).rowcount
+        deleted_records = connection.execute(delete(records).where(records.c.subject_id == subject_id)).rowcount
+        connection.execute(delete(sessions).where(sessions.c.subject_id == subject_id))
+    return {"subject_id": subject_id, "deleted_events": deleted_events, "deleted_records": deleted_records}
 
 
 @app.get("/api/admin/sessions/{subject_id}/export.zip")

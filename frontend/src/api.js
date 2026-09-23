@@ -31,6 +31,8 @@ export const api = {
   complete: id => request(`/api/sessions/${encodeURIComponent(id)}/complete`, {method: "POST"}),
   adminLogin: password => request("/api/admin/login", {method: "POST", body: JSON.stringify({password})}),
   adminSessions: token => request("/api/admin/sessions", {headers: {Authorization: `Bearer ${token}`}}),
+  adminSessionDetail: (token, id) => request(`/api/admin/sessions/${encodeURIComponent(id)}/detail`, {headers: {Authorization: `Bearer ${token}`}}),
+  adminDeleteSession: (token, id) => request(`/api/admin/sessions/${encodeURIComponent(id)}`, {method: "DELETE", headers: {Authorization: `Bearer ${token}`}}),
 };
 
 export async function downloadAdminExport(path, token, fallbackName) {
