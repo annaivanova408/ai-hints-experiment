@@ -7,6 +7,13 @@ import Admin from "./Admin";
 
 const demo = new URLSearchParams(location.search).get("demo") === "1";
 
+// ID текущего участника переживает обновление страницы. Сам прогресс хранится
+// на сервере, здесь только ID, чтобы знать, чью сессию продолжать.
+const SUBJECT_KEY = "hints.subject_id";
+const remembered = () => { try { return localStorage.getItem(SUBJECT_KEY) || ""; } catch { return ""; } };
+const remember = id => { try { localStorage.setItem(SUBJECT_KEY, id); } catch {} };
+const forget = () => { try { localStorage.removeItem(SUBJECT_KEY); } catch {} };
+
 function Shell({children, compact = false}) {
   return <main className={compact ? "experiment-shell" : "shell"}>{!compact && <header className="brand"><Leaf size={27}/> research<span>.lab</span></header>}{children}</main>;
 }
@@ -63,22 +70,31 @@ function DemoNavigator({session,onNavigate}) {
   return <aside className="demo-navigator"><strong>Демо</strong><button title="Предыдущий экран" aria-label="Предыдущий экран" disabled={index===0} onClick={()=>go(index-1)}><ChevronLeft/></button><select aria-label="Экран демонстрации" value={index} onChange={event=>go(Number(event.target.value))}>{DEMO_SCREENS.map((item,itemIndex)=><option key={item.label} value={itemIndex}>{item.label}</option>)}</select><button title="Следующий экран" aria-label="Следующий экран" disabled={index===DEMO_SCREENS.length-1} onClick={()=>go(index+1)}><ChevronRight/></button></aside>;
 }
 
-function Finish({session}) {
-  return <section className="panel prose center instructions-panel"><div className="instruction-progress"><i style={{width:"100%"}}/></div><div className="success" aria-label="Готово"><Check size={30} strokeWidth={2.5}/></div><h1>Спасибо за участие!</h1><p>Исследование завершено.</p></section>;
+function Finish({session,onNew}) {
+  return <section className="panel prose center instructions-panel"><div className="instruction-progress"><i style={{width:"100%"}}/></div><div className="success" aria-label="Готово"><Check size={30} strokeWidth={2.5}/></div><h1>Спасибо за участие!</h1><p>Исследование завершено.</p><button className="primary" onClick={onNew}>Следующий участник <ArrowRight size={20}/></button></section>;
 }
 
 export default function App() {
   const [config, setConfig] = useState(null); const [session, setSession] = useState(null); const [error, setError] = useState("");
+  const [restoring, setRestoring] = useState(!demo && !!remembered());
   useEffect(()=>{ api.config().then(setConfig).catch(e=>setError(e.message)); },[]);
+  // Обновление страницы не должно возвращать участника к регистрации: прогресс
+  // лежит на сервере, в браузере помним только ID, чью сессию продолжать.
+  useEffect(()=>{
+    const subject=remembered();
+    if(demo||!subject){setRestoring(false);return;}
+    api.session(subject).then(setSession).catch(forget).finally(()=>setRestoring(false));
+  },[]);
+  const startSession=saved=>{remember(saved.subject_id);setSession(saved);};
   if (location.pathname === "/admin") return <Admin/>;
   if (location.pathname === "/anxiety") return <Shell><Anxiety config={config}/></Shell>;
   if (error) return <Shell><div className="panel error">{error}</div></Shell>;
-  if (!config) return <Shell><div className="panel">Загрузка...</div></Shell>;
-  if (!session) return <Shell><Setup onStart={setSession}/></Shell>;
+  if (!config || restoring) return <Shell><div className="panel">Загрузка...</div></Shell>;
+  if (!session) return <Shell><Setup onStart={startSession}/></Shell>;
   const screen = session.state?.screen || "instructions";
   let content;
   if (screen === "instructions") content=<Shell><Instructions session={session} onContinue={async()=>{const state={screen:"experiment",phase:"task_instruction"};await api.state(session.subject_id,state);setSession({...session,state});}}/></Shell>;
-  else if (screen === "completed") content=<Shell><Finish session={session}/></Shell>;
+  else if (screen === "completed") content=<Shell><Finish session={session} onNew={()=>{forget();setSession(null);}}/></Shell>;
   else content=<Shell compact><Experiment key={demo?JSON.stringify(session.state):session.subject_id} config={config} initialSession={session} demo={demo} onFinish={s=>setSession(s)}/></Shell>;
   const navigate=async state=>{await api.state(session.subject_id,state);setSession({...session,state});};
   return <>{content}{demo&&screen!=="completed"&&<DemoNavigator session={session} onNavigate={navigate}/>}</>;
