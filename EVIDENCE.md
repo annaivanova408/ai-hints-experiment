@@ -36,3 +36,13 @@ Append-only deployment and verification record.
 - Verification: `GET /`, `/api/health`, `/admin` all 200; downloaded the served JS bundle and confirmed 0 occurrences of "подсказк" and the exact new instruction text ("будет показан обязательный комментарий...") present.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+## 2026-09-23 - Deploy refresh-resume fix to nlab-prod-sbercloud
+
+- `compose.deploy` on compose `hints` (`Lbv2rld4UXieA9wBkrfO_`), project `research`, commit `995a3c9` (page refresh no longer drops the participant back to registration; finish screen gained a "Начать заново" button). The API call was made by the user: outbound calls with the server API key are blocked in this session.
+- Verification: `GET /` 200, `GET /admin` 200, `GET /api/health` 200 `{"status":"ok","config_version":"2026-09-10-matrix-v2"}`; served bundle `index-_rXmles6.js` contains both `Начать заново` and the `hints.subject_id` storage key.
+- Local check before the deploy (vite dev + uvicorn on a copy of the sqlite database, subject `REFRESH-TEST-1`): reload restored the saved session at three different steps; on each reload the app issued `GET /api/sessions/REFRESH-TEST-1` and continued in place.
+- Measured clip delivery from the user's Mac: first pull of `video_1_c08.mp4` 270 KB/s with 3.0 s to first byte (cold), repeat 831 KB/s with 1.4 s; Cloudflare control 903 KB/s. The server delivers near the client's full bandwidth, so the bottleneck is the client link, not the service.
+- Skill version check against the registry was not performed for this session; the local `dokploy` skill copy was used as installed.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
